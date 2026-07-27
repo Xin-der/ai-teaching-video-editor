@@ -32,19 +32,22 @@
 | ASR 语音识别 | FunASR Paraformer | `work/asr_result.json` (**272句**) | ✅ |
 | 分段提取 | draft_content 提取 | `work/scenes.json` (17段) | ✅ |
 | 关键帧抽取 | ffmpeg | `work/frames/` (**51张 JPG**) | ✅ |
+| VLM 描述关键帧 | qwen3.7-plus (DashScope) | `work/frame_descriptions.json` (17段) | ✅ |
+| 合并 content_map | merge_content_map.py | `work/content_map.json` (17段) | ✅ |
+| 风格规则对齐 | qwen3.7-plus (OpenAI兼容) | `style_labels.json` (4条规则) | ✅ |
+| 生成风格说明书 | translate_style.py | `skill_style.md` | ✅ |
 
 ### 进行中 🔄
 
-无。本地处理全部完成。
+无。
 
 ### 待执行 ⏳
 
 | 步骤 | 说明 | 需要 |
 |---|---|---|
-| VLM 描述关键帧 | qwen3.7-plus 看每张帧图 → 结构化标签 | DashScope API key (已配) |
-| 风格规则对齐 | qwen3.7-plus 把"工程参数 + 语义标签"对齐成风格规则 | DashScope API key |
-| 生成风格说明书 | 输出 skill_style.md + style_labels.json | — |
+| 人工审核 | 用户确认 skill_style.md 规则是否正确 | 用户反馈 |
 | 第二段验证 | 用新视频跑完整管线，验证效果 | 新视频素材 |
+| Skill 封装 | 封装为 WorkBuddy/Claude Code Skill | 风格规则稳定后 |
 
 ---
 
@@ -131,7 +134,13 @@ FunClip: D:\tools\FunClip\ (参考用，不直接调用)
 ref/SGOI6715.MOV                     4.0GB  iPhone拍摄的成品驾考教学视频 (15分18秒)
 ref/draft_content.json                3.1MB  剪映加密工程文件
 ref/draft_content.json.dec.json       2.4MB  jy-draftc 解密后的工程文件 (纯JSON)
-ref/materials/                        3张PNG 剪映贴纸素材
+ref/materials/                        6个    路线图素材（原版+处理版+最终版+视频截图）
+  ├─ 原版路线图 (2065×1563 PNG)      含考场建筑、标注、驾校信息
+  ├─ 处理版路线图 (2880×2160 PNG)    清理了大部分无关信息
+  ├─ 另一版本路线图 (2065×1563 PNG)  信息量介于前两者之间
+  ├─ 最终版路线图 (JPG 30KB)         蓝色路径+标题，待色度抠图得透明背景
+  ├─ 视频帧截图 (JPG 395KB)          展示路线图在右上角的叠加效果
+  └─ 视频帧截图 (JPG 155KB)          展示底部文字叠加效果
 ```
 
 ### work/ — 中间产物（不入 git）
@@ -140,12 +149,15 @@ work/ref_audio.wav                   28MB   提取的音频 (16kHz mono PCM)
 work/asr_result.json                  272句  FunASR 语音识别结果
 work/scenes.json                      17段   从工程文件提取的视频分段
 work/style_params_raw.json            关键帧参数原始提取
+work/frame_descriptions.json          17段   VLM 结构化语义标签
+work/content_map.json                 17段   ASR + VLM 合并后的内容地图
 work/frames/segXXX_{start,mid,end}.jpg  51张  每段起止中间3帧 (4K分辨率，较大)
 ```
 
-### output/ — 最终输出（不入 git）
+### output/ — 最终输出
 ```
-（空，第二段渲染的成品 mp4 放这里）
+style_labels.json                     4条    风格规则（JSON，匹配引擎用）
+skill_style.md                        风格说明书（给人看+给 AI 看）
 ```
 
 ### assets/ — 可复用素材（入 git）
@@ -158,9 +170,14 @@ work/frames/segXXX_{start,mid,end}.jpg  51张  每段起止中间3帧 (4K分辨�
 scripts/run_asr.py           ASR 语音识别（分段处理，跳过静音）
 scripts/extract_segments.py  从工程文件提取分段 + 抽关键帧
 scripts/parse_draft_deep.py  深度解析工程文件
+scripts/describe_frames.py   VLM 描述关键帧（qwen3.7-plus 多模态）
+scripts/merge_content_map.py 合并 ASR + VLM → content_map.json
+scripts/translate_style.py   LLM 风格翻译 → skill_style.md + style_labels.json
 scripts/deep_analyze.py      深入分析关键帧数值
 scripts/check_keyframes.py   检查关键帧值结构
 scripts/explore_draft.py     探索工程文件顶层结构
+scripts/asr_diarize.py       (备用) ASR + 说话人分离
+scripts/run_scenes.py        场景检测（PySceneDetect 备用）
 ```
 
 ### docs/ — 文档
