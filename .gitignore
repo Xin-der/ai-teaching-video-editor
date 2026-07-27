@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# 视频文件（太大，不入 git）
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.flv
+*.wmv
+
+# 中间产物
+work/
+output/
+
+# 参考视频和工程文件
+ref/*.mp4
+ref/*.mov
+ref/*.json
+ref/materials/
+
+# 素材（保留目录结构但不提交二进制）
+assets/*.png
+assets/*.jpg
+assets/*.jpeg
+assets/*.webp
+
+# API Keys（绝对不能提交！）
+.env
+*.key
+*_api_key*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment
+.env.local
+.env.*.local

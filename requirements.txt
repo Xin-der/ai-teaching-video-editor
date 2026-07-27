@@ -1,0 +1,24 @@
+# AI 教学视频剪辑 - Python 依赖
+# 安装方式: pip install -r requirements.txt
+
+# 核心工具
+funasr>=1.0.0            # 中文 ASR（FunASR Paraformer + CAM++ 说话人分离）
+modelscope>=1.0.0        # FunASR 模型下载依赖
+scenedetect>=0.6.0       # 镜头/场景检测
+opencv-python>=4.0.0     # PySceneDetect 的 OpenCV 依赖
+moviepy>=2.0.0           # 视频合成 + 特效渲染
+
+# 云端 API SDK
+dashscope>=1.14.0        # 阿里云百炼（qwen-vl-plus 看画面）
+openai>=1.0.0            # DeepSeek（风格翻译，兼容接口）
+
+# PyTorch（FunASR 模型推理）
+torch>=2.0.0
+
+# 工具库
+Pillow>=10.0.0
+numpy>=1.24.0
+tqdm>=4.65.0
+
+# FunClip 工具（非 pip 包，需单独 clone）
+# git clone https://github.com/modelscope/FunClip.git D:\tools\FunClip
