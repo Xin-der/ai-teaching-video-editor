@@ -238,17 +238,10 @@ def main():
 
     # 检查输入视频
     if not os.path.exists(video_source):
-        # 尝试使用参考视频
-        alt_video = "ref/SGOI6715.MOV"
-        if os.path.exists(alt_video):
-            video_source = alt_video
-            print(f"📹 使用参考视频: {video_source}")
-        else:
-            print(f"❌ 未找到输入视频: {video_source}")
-            print("   请将视频放到 input/video.mp4 或 ref/ 目录")
-            sys.exit(1)
-    else:
-        print(f"📹 输入视频: {video_source}")
+        print(f"❌ 未找到输入视频: {video_source}")
+        print("   请将视频放到 input/video.mp4")
+        sys.exit(1)
+    print(f"📹 输入视频: {video_source}")
 
     # 加载路线图
     route_map_clip = None
@@ -256,10 +249,8 @@ def main():
     if route_map_source and os.path.exists(route_map_source):
         print(f"🗺 路线图: {route_map_source}")
         route_map_clip = load_route_map(route_map_source)
-    elif os.path.exists("ref/materials/f6100a8c536c5084cd3add7c4858e7d.jpg"):
-        route_map_source = "ref/materials/f6100a8c536c5084cd3add7c4858e7d.jpg"
-        print(f"🗺 路线图(默认): {route_map_source}")
-        route_map_clip = load_route_map(route_map_source)
+    else:
+        print("🗺 无路线图（input/ 下未找到 route_map.png）")
 
     print(f"🎬 分段数: {edit_data['total_segments']}")
     if has_foot:

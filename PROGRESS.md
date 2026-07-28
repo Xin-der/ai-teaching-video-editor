@@ -46,8 +46,24 @@
 | 步骤 | 说明 | 需要 |
 |---|---|---|
 | 人工审核 | 用户确认 skill_style.md 规则是否正确 | 用户反馈 |
-| 第二段验证 | 用新视频跑完整管线，验证效果 | 新视频素材 |
+| 第二段验证 | 用新视频跑 `python run.py`，验证效果 | 新视频素材 |
 | Skill 封装 | 封装为 WorkBuddy/Claude Code Skill | 风格规则稳定后 |
+
+---
+
+## 8. 重要修复记录
+
+### 2026-07-28: 修复第二段管线硬编码路径
+
+**问题**：`run_asr.py` / `describe_frames.py` / `render.py` 全部硬编码了参考视频路径（`ref/SGOI6715.MOV`、`work/ref_audio.wav` 等），导致第二段出片时完全不读 `input/` 下的新视频，直接照搬参考视频生成相同内容。
+
+**修复**：
+- 新增 `scripts/process_video.py`：完整的"处理新视频"管线，所有输入从 `input/` 读取
+- 重写 `run.py`：自动选择"出片模式"调用 `process_video.py`
+- 修复 `render.py`：移除 `ref/SGOI6715.MOV` fallback 和 `ref/materials/` 默认路线图
+- 第一段（学风格）和第二段（出片）流程现在完全分离
+- 每步结果缓存到 `work/run_{video_hash}/` 目录，支持断点续跑
+- VLM 改为只分析 1 帧/段（mid frame），提速 3 倍
 
 ---
 
