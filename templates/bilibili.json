@@ -1,0 +1,111 @@
+{
+  "platform": "bilibili",
+  "name": "B站横屏模板",
+  "version": "1.0",
+  "description": "16:9横屏 + 标准字幕 + 知识卡片 + 章节标记",
+
+  "video": {
+    "output_resolution": [1920, 1080],
+    "aspect_ratio": "16:9",
+    "fps": 30,
+    "codec": "libx264",
+    "bitrate": "12M",
+    "audio_codec": "aac",
+    "audio_bitrate": "256k"
+  },
+
+  "layout": {
+    "title_card": {
+      "enabled": true,
+      "duration_seconds": 3.0,
+      "position": "center",
+      "font_size_ratio": 0.05,
+      "font": "SimHei",
+      "color": "#FFFFFF",
+      "stroke_color": "#000000",
+      "stroke_width": 2,
+      "bg_color": "rgba(0,0,0,0.6)",
+      "animation": "fade_in",
+      "subtitle_text": "{topic}全流程详解"
+    },
+    "video_area": {
+      "source_crop": "none",
+      "position_y_ratio": 0.0,
+      "height_ratio": 1.0
+    },
+    "subtitle": {
+      "enabled": true,
+      "font_size_ratio": 0.035,
+      "font": "SimHei",
+      "color": "#FFFFFF",
+      "stroke_color": "#000000",
+      "stroke_width": 3,
+      "position_y_ratio": 0.88,
+      "bg_color": "rgba(0,0,0,0.4)",
+      "max_chars_per_line": 30,
+      "max_lines": 2,
+      "word_by_word": false
+    },
+    "knowledge_card": {
+      "enabled": true,
+      "position": "right",
+      "width_ratio": 0.30,
+      "height_ratio": 0.25,
+      "margin_right_ratio": 0.03,
+      "margin_top_ratio": 0.12,
+      "font_size_ratio": 0.025,
+      "font": "SimHei",
+      "color": "#333333",
+      "bg_color": "rgba(255,255,255,0.92)",
+      "border_color": "#FF6600",
+      "border_width": 3,
+      "corner_radius": 12,
+      "icon": "💡",
+      "title": "扣分提示",
+      "max_lines": 4,
+      "animation": "slide_in_right",
+      "show_duration_seconds": 5.0
+    },
+    "chapter_marker": {
+      "enabled": true,
+      "font_size_ratio": 0.03,
+      "font": "SimHei",
+      "color": "#FF6600",
+      "stroke_color": "#000000",
+      "stroke_width": 2,
+      "position_y_ratio": 0.05,
+      "position_x": "left",
+      "margin_left_ratio": 0.03
+    },
+    "ending_card": {
+      "enabled": true,
+      "duration_seconds": 5.0,
+      "text": "感谢观看！记得一键三连~",
+      "font_size_ratio": 0.04,
+      "color": "#FFFFFF",
+      "bg_color": "rgba(0,0,0,0.7)",
+      "subscribe_text": "关注获取更多驾考技巧"
+    }
+  },
+
+  "audio": {
+    "bgm": {
+      "enabled": false
+    },
+    "silence_speedup": {
+      "enabled": false
+    },
+    "original_audio": {
+      "volume_ratio": 1.0
+    }
+  },
+
+  "copy_config": {
+    "include_title": true,
+    "include_hashtags": true,
+    "include_bullet_comments": false,
+    "max_title_length": 80,
+    "include_chapters_in_description": true,
+    "description_style": "educational"
+  }
+}

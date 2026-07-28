@@ -58,16 +58,43 @@
 
 ---
 
-## 下一步（下次会话）
+## 当前进度（v2 多平台智能切片工具）
 
-详见 `HANDOFF.md`
+### ✅ 已完成 (2026-07-28)
 
-核心任务：
-1. 新建 `engine/pipeline.py` — 核心管线
-2. 新建 `engine/scorer.py` — 片段评分引擎  
-3. 新建 `engine/exporter.py` — 多平台模板导出
-4. 新建 `templates/` — 三个平台的 JSON 模板
-5. 新建 `knowledge/driving_exam.json` — 驾考知识库
-6. 重写 `run.py` — 简洁入口
+```
+新增:
+├── engine/
+│   ├── __init__.py          ✅ 模块入口
+│   ├── pipeline.py          ✅ 核心管线（音频→ASR→场景→VLM→分段→评分）
+│   ├── scorer.py            ✅ 片段评分引擎（5维度确定性打分）
+│   └── exporter.py          ✅ 多平台导出器（MoviePy模板渲染）
+├── templates/
+│   ├── douyin.json          ✅ 抖音模板（9:16竖屏+大字幕+关键词弹窗+进度条）
+│   ├── bilibili.json        ✅ B站模板（16:9+知识卡片+章节）
+│   └── xiaohongshu.json     ✅ 小红书模板（1:1+要点覆盖+封面）
+├── knowledge/
+│   └── driving_exam.json    ✅ 驾考知识库（扣分点+高频错误+重点话题）
+└── run.py                   ✅ 重写为简洁CLI入口
+```
 
-先做最小版本：分段 + 评分 + 抖音导出，验证链路后再扩展。
+### 📋 待确认事项（已确认）
+
+1. **界面形式**: 先 CLI，再加 Web 预览界面
+2. **知识库**: 先用预填的 15 个话题 + 扣分点，跑起来再细调
+3. **教学类型**: 先只聚焦驾考
+
+### 🔜 下一步（在新机器上）
+
+1. **准备测试视频** — 已放入 `input/SGOI6715.MOV`（4K HEVC 4GB）
+2. **运行完整管线** — 建议先转 1080p 代理，参考 `HANDOFF_新机器交接.md`
+3. **验证导出** — 用 ffmpeg CLI 代替 MoviePy（MoviePy 在 4K 下太慢）
+4. **调优** — 根据实际效果调整评分权重、合并阈值、模板参数
+5. **Web 预览界面** — 用轻量框架（Flask/FastAPI）做本地预览
+6. **扩展** — 静音加速、BGM 叠加、关键词弹窗动画
+
+### ⚠️ 已知问题
+
+- **4K HEVC 性能瓶颈**: PySceneDetect 和 MoviePy 在 4K 源上超时，需用 1080p 代理
+- **MoviePy API 兼容**: `write_videofile` 的 `verbose`/`preset` 参数在 v2.2.1 不支持
+- **字体路径**: Pillow 需完整路径 `C:/Windows/Fonts/simhei.ttf`

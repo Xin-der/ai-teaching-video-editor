@@ -1,0 +1,165 @@
+{
+  "domain": "驾考教学",
+  "version": "1.0",
+  "description": "驾考教学视频智能切片知识库 - 用于评分引擎的知识匹配",
+
+  "emphasis_keywords": {
+    "high_priority": [
+      {"keyword": "记住", "weight": 1.0, "category": "强调"},
+      {"keyword": "重点", "weight": 1.0, "category": "强调"},
+      {"keyword": "千万别", "weight": 1.0, "category": "警告"},
+      {"keyword": "一定", "weight": 0.9, "category": "强调"},
+      {"keyword": "必须", "weight": 0.9, "category": "强调"},
+      {"keyword": "注意", "weight": 0.8, "category": "提醒"},
+      {"keyword": "小心", "weight": 0.8, "category": "提醒"},
+      {"keyword": "关键", "weight": 0.8, "category": "强调"},
+      {"keyword": "核心", "weight": 0.8, "category": "强调"},
+      {"keyword": "容易错", "weight": 0.9, "category": "警告"},
+      {"keyword": "经常忘", "weight": 0.9, "category": "警告"},
+      {"keyword": "挂科", "weight": 1.0, "category": "警告"}
+    ],
+    "medium_priority": [
+      {"keyword": "考试", "weight": 0.6, "category": "考试相关"},
+      {"keyword": "扣分", "weight": 0.7, "category": "考试相关"},
+      {"keyword": "科目", "weight": 0.5, "category": "考试相关"},
+      {"keyword": "操作", "weight": 0.5, "category": "动作"},
+      {"keyword": "步骤", "weight": 0.5, "category": "动作"},
+      {"keyword": "方法", "weight": 0.4, "category": "动作"},
+      {"keyword": "技巧", "weight": 0.5, "category": "动作"}
+    ]
+  },
+
+  "high_frequency_topics": [
+    {
+      "topic": "夜间灯光操作",
+      "aliases": ["灯光", "远近光", "灯光考试", "夜间灯光", "灯光模拟"],
+      "deduction_points": ["远近光切换延迟扣10分", "灯光错误直接挂科", "忘记关闭所有灯光"],
+      "weight": 1.0
+    },
+    {
+      "topic": "倒车入库",
+      "aliases": ["倒库", "入库", "倒车", "右倒库", "左倒库"],
+      "deduction_points": ["车身出线扣100分", "中途停车扣5分", "未按路线行驶扣100分"],
+      "weight": 0.95
+    },
+    {
+      "topic": "侧方停车",
+      "aliases": ["侧方", "侧方位"],
+      "deduction_points": ["车身出线扣100分", "忘记打转向灯扣10分", "入库后车轮未回正"],
+      "weight": 0.95
+    },
+    {
+      "topic": "直角转弯",
+      "aliases": ["直角", "转弯"],
+      "deduction_points": ["车轮压线扣100分", "忘记打转向灯扣10分", "转弯后未关转向灯"],
+      "weight": 0.85
+    },
+    {
+      "topic": "曲线行驶",
+      "aliases": ["S弯", "S路", "曲线", "弯道"],
+      "deduction_points": ["车轮压线扣100分", "中途停车扣5分"],
+      "weight": 0.85
+    },
+    {
+      "topic": "坡道定点停车与起步",
+      "aliases": ["坡道", "坡起", "定点停车", "半坡"],
+      "deduction_points": ["停车位置不准确扣10分", "溜车扣100分", "熄火扣10分"],
+      "weight": 0.9
+    },
+    {
+      "topic": "靠边停车",
+      "aliases": ["靠边", "路边停车"],
+      "deduction_points": ["距离路沿超过30cm扣10分", "未拉手刹扣10分", "未观察后方来车"],
+      "weight": 0.9
+    },
+    {
+      "topic": "加减档操作",
+      "aliases": ["换挡", "挂档", "加减档", "档位"],
+      "deduction_points": ["档位与速度不匹配扣10分", "越级换挡扣100分"],
+      "weight": 0.85
+    },
+    {
+      "topic": "通过路口",
+      "aliases": ["路口", "红绿灯", "十字路口"],
+      "deduction_points": ["未减速观察扣100分", "闯红灯扣100分", "未礼让行人扣100分"],
+      "weight": 0.85
+    },
+    {
+      "topic": "超车与变道",
+      "aliases": ["超车", "变道", "并线"],
+      "deduction_points": ["未打转向灯扣10分", "未观察后视镜扣100分", "实线变道扣100分"],
+      "weight": 0.8
+    },
+    {
+      "topic": "掉头",
+      "aliases": ["调头", "U型弯"],
+      "deduction_points": ["禁止掉头处掉头扣100分", "未观察对向来车"],
+      "weight": 0.8
+    },
+    {
+      "topic": "模拟灯光",
+      "aliases": ["灯光模拟", "语音灯光"],
+      "deduction_points": ["操作超时扣100分", "灯光使用错误扣100分"],
+      "weight": 0.9
+    },
+    {
+      "topic": "上车准备",
+      "aliases": ["起步准备", "调整座椅", "调整后视镜", "系安全带"],
+      "deduction_points": ["未系安全带扣100分", "未调整座椅后视镜", "未观察周围环境"],
+      "weight": 0.75
+    },
+    {
+      "topic": "直线行驶",
+      "aliases": ["直线", "跑直线"],
+      "deduction_points": ["方向偏移扣100分", "速度不达标"],
+      "weight": 0.8
+    },
+    {
+      "topic": "会车",
+      "aliases": ["会车"],
+      "deduction_points": ["未减速靠右扣100分", "距离判断不当"],
+      "weight": 0.75
+    }
+  ],
+
+  "visual_emphasis_signals": {
+    "high_value": ["文字叠加", "路线图", "特写镜头", "图表标注", "红圈标记"],
+    "medium_value": ["仪表盘", "手势示意", "多角度展示", "慢动作回放"],
+    "low_value": ["远景", "教练正常讲解", "车辆行驶中"]
+  },
+
+  "platform_copy_templates": {
+    "douyin": {
+      "title_patterns": [
+        "【驾考必看】{topic}，记住这{num_points}点就够了！",
+        "教练教你{topic}，考试再也不慌！",
+        "{topic}最容易挂科的{num_points}个细节！",
+        "科目三{topic}满分技巧，学会立省{num_points}分！"
+      ],
+      "hashtags": ["#驾考", "#科目三", "#学车", "#驾照考试", "#驾驶技巧"],
+      "engagement_hooks": [
+        "你觉得最难的是哪项？评论区告诉我！",
+        "收藏起来考前看一遍！",
+        "转发给正在学车的朋友！"
+      ]
+    },
+    "bilibili": {
+      "title_patterns": [
+        "【驾考教学】{topic}全流程详解",
+        "科目三{topic} | 教练手把手教学",
+        "驾照考试{topic}技巧总结 | 看完就会"
+      ],
+      "hashtags": ["#驾考教学", "#驾驶技巧", "#科目三"],
+      "description_template": "本期讲解{topic}的完整操作步骤和常见扣分点。\n\n⏱ 时间戳：\n{chapter_timestamps}\n\n📌 重点提示：\n{key_points}"
+    },
+    "xiaohongshu": {
+      "title_patterns": [
+        "📝驾考笔记 | {topic}操作要点",
+        "学车人必存！{topic}步骤整理",
+        "科目三{topic}，看这篇就够了！"
+      ],
+      "hashtags": ["#驾考笔记", "#学车日记", "#科目三", "#驾照"],
+      "note_style": "要点列表"
+    }
+  }
+}
