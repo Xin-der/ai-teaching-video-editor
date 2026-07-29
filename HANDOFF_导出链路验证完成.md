@@ -129,9 +129,84 @@ py -3.12 run.py input/PNIK4383.MOV --export
 
 ---
 
+---
+
+## 视频效果调优指南（给下次会话）
+
+### 可调参数速查表
+
+#### A. ASS 字幕样式 — `engine/exporter.py` → `_ass_header()`
+
+| 参数 | 当前值 | 说明 | 调整方向 |
+|------|--------|------|---------|
+| Title 字体大小 | `out_h * 0.06` | 标题卡文字 | 太小改大 ratio |
+| Subtitle 字体大小 | `out_h * 0.045` | 底部字幕 | 抖音竖屏可能需要更大 |
+| Subtitle 位置 Y | `out_h * 0.80` | 字幕垂直位置 | 0.85 更低, 0.75 更高 |
+| Popup 字体大小 | `out_h * 0.05` | 关键词弹窗 | 抖音需要醒目 |
+| Popup 位置 Y | `out_h * 0.50` | 弹窗垂直位置 | 0.45 偏上, 0.55 偏下 |
+| 所有颜色 | `&H00FFFFFF` 等 | ASS ABGR 格式 | 参考模板 JSON 里的 color 字段 |
+| 描边宽度 | `Outline` 列 | 当前 3-4 | 越大描边越粗 |
+
+#### B. 平台模板 — `templates/*.json`
+
+| 参数 | 文件 | 当前值 | 说明 |
+|------|------|--------|------|
+| 输出分辨率 | `video.output_resolution` | 1080x1920 / 1920x1080 / 1080x1080 | 抖音可改 720x1280 减小文件 |
+| 码率 | `video.bitrate` | 8M / 12M / 6M | 越大质量越好文件越大 |
+| 标题卡时长 | `layout.title_card.duration_seconds` | 2.0s / 3.0s | 抖音应更短 |
+| 结尾卡文字 | `layout.ending_card.text` | 各平台不同 | 自定义互动引导语 |
+| 关键词触发词 | `layout.keyword_popup.trigger_keywords` | 10个词 | 增减触发词 |
+| 弹窗时长 | `layout.keyword_popup.duration_seconds` | 1.5s | 太快看不清改 2.0s |
+| 知识卡片时长 | `layout.knowledge_card.show_duration_seconds` | 5.0s | B站 |
+| 进度条高度 | `layout.progress_bar.height_px` | 4px | 太细改 6-8px |
+| 字幕每行字数 | `layout.subtitle.max_chars_per_line` | 18 douyin / 30 bilibili | 抖音竖屏应更少 |
+
+#### C. 编码质量 — `engine/exporter.py` → `_detect_encoder()`
+
+| 编码器 | 参数 | 当前值 | 说明 |
+|--------|------|--------|------|
+| NVENC | `cq` | 23 | 越小质量越好 (18-28) |
+| NVENC | `preset` | p4 | p1最快 p7最慢质量最好 |
+| libx264 | `crf` | 23 | 越小质量越好 (18-28) |
+| libx264 | `preset` | fast | medium/slow 质量更好但慢 |
+
+#### D. 视频裁切 — `engine/exporter.py` → `_build_video_filters()`
+
+当前逻辑：中心裁切。如果关键内容不在画面中心，需要改裁切位置。
+- 抖音 9:16：从 16:9 左右裁掉 60%，保留中间 40%
+- 小红书 1:1：裁掉左右 25%
+
+#### E. 评分权重 — `engine/scorer.py` → `__init__()`
+
+如果选出的"最佳片段"不理想，调整权重：
+```python
+self.weights = {
+    "keywords": 0.30,       # 关键词密度
+    "knowledge_match": 0.25, # 知识库匹配
+    "duration_ratio": 0.20,  # 时长占比
+    "visual_emphasis": 0.15, # 画面信号
+    "repetition": 0.10,      # 重复强调
+}
+```
+
+### 常见效果问题排查
+
+| 问题 | 可能原因 | 调整位置 |
+|------|---------|---------|
+| 字幕太小看不清 | 字体大小 ratio 不够 | `_ass_header()` Subtitle 样式 |
+| 标题卡一闪而过 | duration 太短 | 模板 `title_card.duration_seconds` |
+| 竖屏裁掉了人脸 | 中心裁切不适用 | `_build_video_filters()` crop 参数 |
+| 视频文件太大 | 码率太高 | 模板 `video.bitrate` |
+| 关键内容没字幕 | ASR 漏识别/时间轴偏移 | ASR 模型或后处理 |
+| 弹窗太多/太少 | 触发词太宽泛/太严格 | 模板 `trigger_keywords` |
+| 进度条看不到 | 颜色太淡/太细 | 模板 `progress_bar` 参数 |
+| 导出太慢 | 没用 NVENC | 检查 `_detect_encoder()` 输出 |
+
+---
+
 ## 下次会话启动语
 
 ```
 请先读 HANDOFF.md、HANDOFF_导出链路验证完成.md 了解当前状态。
-ASR 的 AppLocker 问题已解决，请帮我跑完整管线验证。
+请帮我继续优化视频导出效果。
 ```
