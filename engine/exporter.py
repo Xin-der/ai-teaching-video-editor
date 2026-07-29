@@ -1,5 +1,5 @@
 """
-多平台视频导出器 — MoviePy 模板渲染
+多平台视频导出器 — ffmpeg CLI 渲染（支持 NVENC 硬件编码）
 
 支持的平台:
   - douyin:      9:16 竖屏 + 大字幕 + 关键词弹窗 + 进度条
@@ -7,59 +7,98 @@
   - xiaohongshu: 1:1 方形 + 要点列表 + 封面图
 
 渲染管线:
-  源视频片段 → 裁切适配比例 → 叠加标题卡 → 叠加字幕轨道 → 叠加进度条 → 叠加卡片/弹窗 → 导出
+  源视频片段 → ffmpeg 裁切/缩放 → ASS 字幕叠加 → NVENC/libx264 编码 → mp4
+
+技术选择:
+  - 使用 ASS 字幕格式处理所有文字叠加（比 drawtext 滤镜更强大，原生支持中文）
+  - 使用 ffmpeg 原生滤镜处理视频变换和进度条
+  - 编码端优先 NVENC 硬件加速，不可用时降级到 libx264
+  - 不再依赖 MoviePy（避免逐帧处理的性能问题）
 """
 
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-# MoviePy 2.x
-from moviepy import VideoFileClip, TextClip, CompositeVideoClip, ColorClip
-from moviepy.video.fx import FadeIn, FadeOut
-import moviepy.config as mpconfig
-
 from .scorer import SegmentScorer
+
+
+# ------------------------------------------------------------------
+# 编码器探测
+# ------------------------------------------------------------------
+def _detect_encoder() -> tuple:
+    """检测可用的 H.264 编码器，优先 NVENC
+
+    Returns:
+        (encoder_name, encoder_params_dict)
+    """
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-encoders"],
+            capture_output=True, text=True, timeout=10
+        )
+        if "h264_nvenc" in result.stdout:
+            return "h264_nvenc", {
+                "preset": "p4",
+                "cq": "23",
+                "rc": "vbr",
+            }
+    except Exception:
+        pass
+
+    # 降级到 libx264
+    return "libx264", {
+        "preset": "fast",
+        "crf": "23",
+    }
 
 
 # ------------------------------------------------------------------
 # 字体检测
 # ------------------------------------------------------------------
 def _detect_chinese_font() -> str:
-    """检测系统中可用的中文字体，返回完整路径"""
+    """检测系统中可用的中文字体名，返回 ffmpeg/libass 可识别的字体名
+
+    ASS 字幕使用字体名（非路径），ffmpeg 通过 fontconfig/系统字体目录查找。
+    同时验证 Pillow 能否加载（用于封面图生成）。
+    """
     if os.name == "nt":
-        # Windows 字体目录
+        # Windows: 字体名 + 文件路径映射
         font_dir = os.environ.get("WINDIR", r"C:\Windows") + r"\Fonts"
         candidates = [
-            os.path.join(font_dir, "simhei.ttf"),
-            os.path.join(font_dir, "msyh.ttf"),
-            os.path.join(font_dir, "simsun.ttf"),
-            os.path.join(font_dir, "SIMHEI.TTF"),
+            ("SimHei", os.path.join(font_dir, "simhei.ttf")),
+            ("Microsoft YaHei", os.path.join(font_dir, "msyh.ttf")),
+            ("SimSun", os.path.join(font_dir, "simsun.ttc")),
+            ("SimHei", os.path.join(font_dir, "SIMHEI.TTF")),
         ]
     else:
+        font_dir = "/usr/share/fonts"
         candidates = [
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttf",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            ("Noto Sans CJK SC", f"{font_dir}/truetype/noto/NotoSansCJK-Regular.ttf"),
+            ("Noto Sans CJK", f"{font_dir}/opentype/noto/NotoSansCJK-Regular.ttc"),
+            ("WenQuanYi Micro Hei", f"{font_dir}/truetype/wqy/wqy-microhei.ttc"),
         ]
 
-    for path in candidates:
-        if os.path.exists(path):
+    from PIL import ImageFont
+
+    for font_name, font_path in candidates:
+        # 优先用路径验证（Pillow 需要路径，ASS 需要名称）
+        if os.path.exists(font_path):
             try:
-                from PIL import ImageFont
-                ImageFont.truetype(path, 20)
-                return path
+                ImageFont.truetype(font_path, 20)
+                return font_name  # 返回字体名（ASS 用），但路径已验证
             except Exception:
                 continue
 
-    # 最后尝试按名称加载
+    # 降级：尝试只用名称
     for name in ["SimHei", "Arial"]:
         try:
-            from PIL import ImageFont
             ImageFont.truetype(name, 20)
             return name
         except Exception:
@@ -85,14 +124,16 @@ def _load_template(platform: str) -> dict:
 # 导出器主类
 # ------------------------------------------------------------------
 class VideoExporter:
-    """多平台视频导出器"""
+    """多平台视频导出器（ffmpeg CLI 后端）"""
 
     def __init__(self, output_dir: str = "output", font: Optional[str] = None):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.font = font or _detect_chinese_font()
-        # 用于文案生成的 scorer（复用其知识库）
         self._scorer: Optional[SegmentScorer] = None
+
+        # 探测编码器（只执行一次）
+        self._encoder, self._encoder_params = _detect_encoder()
 
     # ------------------------------------------------------------------
     # 公开入口
@@ -113,7 +154,6 @@ class VideoExporter:
         """
         template = _load_template(platform)
 
-        # 创建片段输出目录
         seg_name = self._safe_filename(segment.get("topic", f"segment_{segment['id']}"))
         seg_dir = self.output_dir / seg_name
         seg_dir.mkdir(parents=True, exist_ok=True)
@@ -123,15 +163,17 @@ class VideoExporter:
         print(f"\n{'='*60}")
         print(f"  导出: [{platform}] {segment.get('topic', '无主题')}")
         print(f"  片段: {segment['start']:.1f}s - {segment['end']:.1f}s ({segment['duration']:.1f}s)")
+        print(f"  编码: {self._encoder}")
         print(f"  输出: {output_path}")
         print(f"{'='*60}")
 
         # 渲染
-        self._render(segment, source_video, template, output_path, asr_segments or [])
+        self._render_ffmpeg(segment, source_video, template, output_path,
+                            asr_segments or [], seg_dir)
 
         # 生成封面（小红书需要）
         cover_path = None
-        if platform == "xiaohongshu" and template["layout"]["cover_image"]["enabled"]:
+        if platform == "xiaohongshu" and template["layout"].get("cover_image", {}).get("enabled"):
             cover_path = self._generate_cover(segment, source_video, template, seg_dir)
 
         # 生成文案
@@ -156,7 +198,6 @@ class VideoExporter:
         results = []
         for seg in segments:
             for plat in platforms:
-                # 检查该平台是否适合
                 suit = seg.get("score_result", {}).get("platform_suitability", {}).get(plat, "中")
                 if suit == "低":
                     print(f"  ⏭ 跳过 [{plat}] {seg.get('topic')} — 不适合该平台")
@@ -172,287 +213,393 @@ class VideoExporter:
         return results
 
     # ------------------------------------------------------------------
-    # 渲染核心
+    # ffmpeg 渲染核心
     # ------------------------------------------------------------------
 
-    def _render(self, segment: dict, source_video: str,
-                template: dict, output_path: str, asr_segments: list):
-        """渲染单个片段为视频文件"""
-        layout = template["layout"]
+    def _render_ffmpeg(self, segment: dict, source_video: str,
+                       template: dict, output_path: str,
+                       asr_segments: list, seg_dir: Path):
+        """使用 ffmpeg CLI 渲染视频
+
+        步骤:
+          1. 生成 ASS 字幕文件（所有文字叠加层）
+          2. 构建视频滤镜链（裁切 + 缩放 + 进度条 + 字幕烧录）
+          3. 执行 ffmpeg 命令编码导出
+        """
         video_cfg = template["video"]
+        layout = template["layout"]
         out_w, out_h = video_cfg["output_resolution"]
         fps = video_cfg["fps"]
         seg_start = segment["start"]
         seg_end = segment["end"]
         seg_duration = seg_end - seg_start
 
-        # ---------- 1. 加载并裁切源视频 ----------
-        clip = VideoFileClip(source_video).subclipped(seg_start, seg_end)
+        # ---------- 1. 生成 ASS 字幕文件 ----------
+        ass_path = str(seg_dir / "subtitles.ass")
+        self._write_ass_file(
+            segment, template, asr_segments, ass_path,
+            out_w, out_h, seg_start, seg_duration
+        )
 
-        # 计算裁切参数（中心裁切到目标比例）
-        src_w, src_h = clip.size
-        target_ratio = out_w / out_h
-        src_ratio = src_w / src_h
+        # ---------- 2. 构建视频滤镜链 ----------
+        filter_parts = self._build_video_filters(
+            source_video, template, ass_path,
+            out_w, out_h, seg_duration
+        )
 
-        if target_ratio > src_ratio:
-            # 目标更宽 → 裁切上下
-            new_h = int(src_w / target_ratio)
-            crop_y = (src_h - new_h) // 2
-            clip = clip.cropped(y1=crop_y, y2=crop_y + new_h)
-        elif target_ratio < src_ratio:
-            # 目标更高 → 裁切左右
-            new_w = int(src_h * target_ratio)
-            crop_x = (src_w - new_w) // 2
-            clip = clip.cropped(x1=crop_x, x2=crop_x + new_w)
+        # ---------- 3. 执行 ffmpeg ----------
+        # 视频编码参数
+        if self._encoder == "h264_nvenc":
+            vcodec_params = [
+                "-c:v", "h264_nvenc",
+                "-preset", self._encoder_params["preset"],
+                "-cq", self._encoder_params["cq"],
+                "-rc", self._encoder_params["rc"],
+            ]
+        else:
+            vcodec_params = [
+                "-c:v", "libx264",
+                "-preset", self._encoder_params["preset"],
+                "-crf", self._encoder_params["crf"],
+            ]
 
-        # 缩放到输出分辨率
-        clip = clip.resized((out_w, out_h))
+        # 构建完整命令行
+        ffmpeg = os.environ.get("FFMPEG", "ffmpeg")
+        cmd = [
+            ffmpeg,
+            "-ss", str(seg_start),
+            "-t", str(seg_duration),
+            "-i", source_video,
+            "-vf", ",".join(filter_parts),
+            "-r", str(fps),
+            *vcodec_params,
+            "-b:v", video_cfg.get("bitrate", "8M"),
+            "-c:a", video_cfg.get("audio_codec", "aac"),
+            "-b:a", video_cfg.get("audio_bitrate", "256k"),
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            "-y",
+            output_path,
+        ]
 
-        # ---------- 2. 构建叠加层 ----------
-        overlays = [clip]
-        current_time = 0.0
+        # 打印命令（方便调试）
+        print(f"  ffmpeg cmd: {' '.join(cmd)[:200]}...")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600,  # 10 分钟超时
+            )
+            if result.returncode != 0:
+                # 打印 ffmpeg 错误信息
+                stderr_tail = result.stderr.strip().split("\n")[-10:]
+                print(f"  ⚠ ffmpeg 错误:\n" + "\n".join(stderr_tail))
+                raise RuntimeError(f"ffmpeg 导出失败 (code={result.returncode})")
+
+            print(f"  ✓ 导出完成: {output_path}")
+
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("ffmpeg 导出超时（10分钟）")
+        except FileNotFoundError:
+            raise RuntimeError("找不到 ffmpeg，请确认已安装并加入 PATH")
+
+    # ------------------------------------------------------------------
+    # ASS 字幕文件生成
+    # ------------------------------------------------------------------
+
+    def _write_ass_file(self, segment: dict, template: dict,
+                        asr_segments: list, ass_path: str,
+                        out_w: int, out_h: int,
+                        seg_start: float, seg_duration: float):
+        """生成 ASS 字幕文件，包含所有文字叠加层"""
+        layout = template["layout"]
+
+        # 收集所有 ASS 对话事件
+        events = []
 
         # --- 标题卡 ---
         if layout.get("title_card", {}).get("enabled"):
-            title_dur = layout["title_card"]["duration_seconds"]
-            title_clip = self._make_title_card(
-                segment.get("topic", ""),
-                template, out_w, out_h, title_dur
-            )
-            if title_clip is not None:
-                overlays.append(title_clip.with_start(0))
-                current_time += title_dur
+            events.extend(self._ass_title_card(segment, template, out_w, out_h))
 
         # --- 结尾卡 ---
-        end_dur = 0
         if layout.get("ending_card", {}).get("enabled"):
-            end_dur = layout["ending_card"]["duration_seconds"]
-            end_clip = self._make_ending_card(template, out_w, out_h, end_dur)
-            if end_clip is not None:
-                end_start = max(seg_duration - end_dur, 0)
-                overlays.append(end_clip.with_start(end_start))
+            events.extend(self._ass_ending_card(template, out_w, out_h, seg_duration))
 
-        # --- 字幕轨道 ---
+        # --- 字幕 ---
         if layout.get("subtitle", {}).get("enabled"):
-            sub_clips = self._make_subtitle_clips(
-                segment, asr_segments, template, out_w, out_h, seg_start, seg_end
-            )
-            overlays.extend(sub_clips)
+            events.extend(self._ass_subtitles(
+                segment, asr_segments, template, out_w, out_h, seg_start
+            ))
 
         # --- 关键词弹窗（抖音） ---
         if layout.get("keyword_popup", {}).get("enabled"):
-            popup_clips = self._make_keyword_popups(
+            events.extend(self._ass_keyword_popups(
                 segment, asr_segments, template, out_w, out_h
-            )
-            overlays.extend(popup_clips)
+            ))
 
         # --- 知识卡片（B站） ---
         if layout.get("knowledge_card", {}).get("enabled"):
-            kc = self._make_knowledge_card(
+            events.extend(self._ass_knowledge_card(
                 segment, template, out_w, out_h, seg_duration
-            )
-            if kc is not None:
-                overlays.append(kc)
+            ))
 
         # --- 要点覆盖（小红书） ---
         if layout.get("key_points_overlay", {}).get("enabled"):
-            kp = self._make_key_points_overlay(
+            events.extend(self._ass_key_points_overlay(
                 segment, template, out_w, out_h, seg_duration
-            )
-            if kp is not None:
-                overlays.append(kp)
+            ))
 
-        # --- 进度条 ---
-        if layout.get("progress_bar", {}).get("enabled"):
-            pb = self._make_progress_bar(template, out_w, out_h, seg_duration)
-            if pb is not None:
-                overlays.append(pb.with_start(0))
+        # 写入 ASS 文件
+        header = self._ass_header(template, out_w, out_h)
+        with open(ass_path, "w", encoding="utf-8-sig") as f:
+            f.write(header)
+            f.write("\n[Events]\n")
+            f.write("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
+            for evt in events:
+                f.write(evt + "\n")
 
-        # ---------- 3. 合成并导出 ----------
-        final = CompositeVideoClip(overlays, size=(out_w, out_h))
+        print(f"  ✓ ASS 字幕: {ass_path} ({len(events)} 事件)")
 
-        # 限制总时长
-        final = final.subclipped(0, seg_duration)
+    def _ass_header(self, template: dict, out_w: int, out_h: int) -> str:
+        """生成 ASS 文件头部（含样式定义）"""
+        video_cfg = template["video"]
+        layout = template["layout"]
 
-        # 导出
-        final.write_videofile(
-            output_path,
-            fps=fps,
-            codec=video_cfg.get("codec", "libx264"),
-            bitrate=video_cfg.get("bitrate", "8M"),
-            audio_codec=video_cfg.get("audio_codec", "aac"),
-            audio_bitrate=video_cfg.get("audio_bitrate", "256k"),
-            logger=None,
+        # 基础字体大小（按分辨率缩放）
+        base_fs = int(out_h * 0.04)
+
+        # 颜色转换: #RRGGBB or rgba(r,g,b,a) -> &HAABBGGRR
+        def ass_color(hex_or_rgba: str, alpha: int = 0) -> str:
+            """转 ASS 颜色格式 &HAABBGGRR"""
+            r, g, b = 255, 255, 255
+            a = alpha
+            if hex_or_rgba.startswith("rgba("):
+                parts = re.findall(r'[\d.]+', hex_or_rgba)
+                if len(parts) >= 4:
+                    r, g, b, a_frac = int(parts[0]), int(parts[1]), int(parts[2]), float(parts[3])
+                    a = int((1 - a_frac) * 255)  # ASS alpha: 0=opaque, 255=transparent
+            elif hex_or_rgba.startswith("#"):
+                h = hex_or_rgba.lstrip("#")
+                if len(h) == 6:
+                    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+                elif len(h) == 3:
+                    r, g, b = int(h[0]*2, 16), int(h[1]*2, 16), int(h[2]*2, 16)
+            return f"&H{a:02X}{b:02X}{g:02X}{r:02X}"
+
+        # 样式定义
+        styles = []
+
+        # Default
+        styles.append(
+            f"Style: Default,{self.font},{base_fs},"
+            f"&H00FFFFFF,&H00000000,&H00000000,&H00000000,"
+            f"0,0,0,0,100,100,0,0,1,0,0,2,10,10,10,1"
         )
 
-        # 清理
-        clip.close()
-        final.close()
-        for ov in overlays:
-            try:
-                ov.close()
-            except Exception:
-                pass
+        # Title — 顶部居中，半透明黑底
+        title_cfg = layout.get("title_card", {})
+        title_fs = int(out_h * title_cfg.get("font_size_ratio", 0.06))
+        title_color = ass_color(title_cfg.get("color", "#FFFFFF"))
+        title_stroke = ass_color(title_cfg.get("stroke_color", "#000000"))
+        styles.append(
+            f"Style: Title,{self.font},{title_fs},"
+            f"{title_color},&H00000000,{title_stroke},&H80000000,"
+            f"1,0,0,0,100,100,0,0,3,3,0,8,10,10,10,1"
+        )
 
-        print(f"  ✓ 导出完成: {output_path}")
+        # Subtitle — 底部居中，黑色描边
+        sub_cfg = layout.get("subtitle", {})
+        sub_fs = int(out_h * sub_cfg.get("font_size_ratio", 0.045))
+        sub_color = ass_color(sub_cfg.get("color", "#FFFFFF"))
+        sub_stroke = ass_color(sub_cfg.get("stroke_color", "#000000"))
+        styles.append(
+            f"Style: Subtitle,{self.font},{sub_fs},"
+            f"{sub_color},&H00000000,{sub_stroke},&H00000000,"
+            f"0,0,0,0,100,100,0,0,1,4,0,2,10,10,10,1"
+        )
+
+        # Popup — 居中，红底黄字
+        popup_cfg = layout.get("keyword_popup", {})
+        popup_fs = int(out_h * popup_cfg.get("font_size_ratio", 0.05))
+        popup_color = ass_color(popup_cfg.get("color", "#FFD700"))
+        popup_stroke = ass_color(popup_cfg.get("stroke_color", "#CC0000"))
+        styles.append(
+            f"Style: Popup,{self.font},{popup_fs},"
+            f"{popup_color},&H00000000,{popup_stroke},&HCC0000FF,"
+            f"1,0,0,0,100,100,0,0,3,3,0,5,10,10,10,1"
+        )
+
+        # KnowledgeCard — 右侧浮层，白底深色字
+        kc_cfg = layout.get("knowledge_card", {})
+        kc_fs = int(out_h * kc_cfg.get("font_size_ratio", 0.025))
+        kc_color = ass_color(kc_cfg.get("color", "#333333"))
+        styles.append(
+            f"Style: KnowledgeCard,{self.font},{kc_fs},"
+            f"{kc_color},&H00000000,&H00000000,&HEBFFFFFF,"
+            f"0,0,0,0,100,100,0,0,3,0,0,7,10,10,10,1"
+        )
+
+        # KeyPoints — 右侧覆盖，半透明黑底白字
+        kp_cfg = layout.get("key_points_overlay", {})
+        kp_fs = int(out_h * kp_cfg.get("font_size_ratio", 0.028))
+        kp_color = ass_color(kp_cfg.get("color", "#FFFFFF"))
+        kp_stroke = ass_color(kp_cfg.get("stroke_color", "#000000"))
+        styles.append(
+            f"Style: KeyPoints,{self.font},{kp_fs},"
+            f"{kp_color},&H00000000,{kp_stroke},&H99000000,"
+            f"0,0,0,0,100,100,0,0,3,2,0,7,10,10,10,1"
+        )
+
+        # Ending — 全屏居中
+        end_cfg = layout.get("ending_card", {})
+        end_fs = int(out_h * end_cfg.get("font_size_ratio", 0.04))
+        end_color = ass_color(end_cfg.get("color", "#FFFFFF"))
+        styles.append(
+            f"Style: Ending,{self.font},{end_fs},"
+            f"{end_color},&H00000000,&H00000000,&HB2000000,"
+            f"1,0,0,0,100,100,0,0,3,0,0,5,10,10,10,1"
+        )
+
+        # ChapterMarker — 左上角
+        styles.append(
+            f"Style: ChapterMarker,{self.font},{int(out_h*0.03)},"
+            f"&H000066FF,&H00000000,&H00000000,&H00000000,"
+            f"1,0,0,0,100,100,0,0,1,2,0,7,10,10,10,1"
+        )
+
+        return (
+            f"[Script Info]\n"
+            f"Title: AI Teaching Video Export\n"
+            f"ScriptType: v4.00+\n"
+            f"PlayResX: {out_w}\n"
+            f"PlayResY: {out_h}\n"
+            f"WrapStyle: 2\n"
+            f"ScaledBorderAndShadow: yes\n"
+            f"\n"
+            f"[V4+ Styles]\n"
+            f"Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+            f"OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+            f"ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+            f"Alignment, MarginL, MarginR, MarginV, Encoding\n"
+            + "\n".join(styles) + "\n"
+        )
 
     # ------------------------------------------------------------------
-    # UI 组件构建
+    # ASS 事件生成器
     # ------------------------------------------------------------------
 
-    def _make_title_card(self, topic: str, template: dict,
-                         out_w: int, out_h: int, duration: float) -> Optional[VideoFileClip]:
-        """标题卡：顶部或全屏文字"""
+    def _sec_to_ass_time(self, seconds: float) -> str:
+        """秒 → ASS 时间格式 H:MM:SS.cc"""
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = int(seconds % 60)
+        cs = int((seconds % 1) * 100)
+        return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+    def _escape_ass_text(self, text: str) -> str:
+        """转义 ASS 特殊字符"""
+        # ASS 中不需要转义大多数字符，但需要处理换行 \N
+        return text.replace("\n", "\\N").replace("{", "\\{").replace("}", "\\}")
+
+    def _ass_title_card(self, segment: dict, template: dict,
+                        out_w: int, out_h: int) -> list:
+        """标题卡 ASS 事件"""
         cfg = template["layout"]["title_card"]
+        topic = segment.get("topic", "")
         if not topic:
-            return None
+            return []
 
-        font_size = int(out_h * cfg.get("font_size_ratio", 0.06))
-        color = cfg.get("color", "#FFFFFF")
-        stroke_color = cfg.get("stroke_color", "#000000")
-        stroke_w = cfg.get("stroke_width", 3)
-        bg = cfg.get("bg_color", "rgba(0,0,0,0.5)")
+        duration = cfg.get("duration_seconds", 2.0)
+        text = self._escape_ass_text(topic)
+        # 顶部居中偏上
+        y_pos = int(out_h * 0.06)
 
-        try:
-            # 背景层
-            bg_clip = ColorClip(size=(out_w, int(out_h * cfg.get("bg_height_ratio", 0.12))),
-                                color=self._parse_rgba(bg))
+        return [
+            f"Dialogue: 0,{self._sec_to_ass_time(0)},"
+            f"{self._sec_to_ass_time(duration)},"
+            f"Title,,0,0,0,,{{\\pos({out_w//2},{y_pos})\\fad(300,0)}}{text}"
+        ]
 
-            # 文字层
-            txt_clip = TextClip(
-                text=topic,
-                font=self.font,
-                font_size=font_size,
-                color=color,
-                stroke_color=stroke_color,
-                stroke_width=stroke_w,
-            ).with_duration(duration)
-
-            # 组合：背景 + 居中文字
-            combined = CompositeVideoClip([
-                bg_clip.with_position(("center", 0)),
-                txt_clip.with_position(("center", "center")),
-            ], size=(out_w, out_h)).with_duration(duration)
-
-            return combined.with_effects([FadeIn(0.3)])
-        except Exception as e:
-            print(f"  ⚠ 标题卡渲染失败: {e}")
-            return None
-
-    def _make_ending_card(self, template: dict, out_w: int, out_h: int,
-                          duration: float) -> Optional[VideoFileClip]:
-        """结尾互动卡片"""
+    def _ass_ending_card(self, template: dict, out_w: int, out_h: int,
+                         seg_duration: float) -> list:
+        """结尾卡 ASS 事件"""
         cfg = template["layout"]["ending_card"]
         text = cfg.get("text", "")
         if not text:
-            return None
+            return []
 
-        font_size = int(out_h * cfg.get("font_size_ratio", 0.04))
-        color = cfg.get("color", "#FFFFFF")
-        bg = cfg.get("bg_color", "rgba(0,0,0,0.7)")
+        duration = cfg.get("duration_seconds", 3.0)
+        start_t = max(seg_duration - duration, 0)
+        text = self._escape_ass_text(text)
 
-        try:
-            bg_clip = ColorClip(size=(out_w, out_h), color=self._parse_rgba(bg))
-            txt_clip = TextClip(
-                text=text,
-                font=self.font,
-                font_size=font_size,
-                color=color,
-            ).with_duration(duration).with_position(("center", "center"))
-
-            return CompositeVideoClip([bg_clip, txt_clip]).with_duration(duration)
-        except Exception as e:
-            print(f"  ⚠ 结尾卡渲染失败: {e}")
-            return None
-
-    def _make_subtitle_clips(self, segment: dict, asr_segments: list,
-                             template: dict, out_w: int, out_h: int,
-                             seg_start: float, seg_end: float) -> list:
-        """生成字幕片段列表"""
-        cfg = template["layout"]["subtitle"]
-        font_size = int(out_h * cfg.get("font_size_ratio", 0.045))
-        color = cfg.get("color", "#FFFFFF")
-        stroke_color = cfg.get("stroke_color", "#000000")
-        stroke_w = cfg.get("stroke_width", 4)
-        pos_y_ratio = cfg.get("position_y_ratio", 0.80)
-        max_chars = cfg.get("max_chars_per_line", 18)
-
-        clips = []
-
-        # 筛选片段时间范围内的 ASR 段
-        seg_asr = [
-            s for s in asr_segments
-            if s.get("start", 0) >= seg_start and s.get("end", 0) <= seg_end
+        return [
+            f"Dialogue: 0,{self._sec_to_ass_time(start_t)},"
+            f"{self._sec_to_ass_time(seg_duration)},"
+            f"Ending,,0,0,0,,{{\\pos({out_w//2},{out_h//2})\\fad(500,0)}}{text}"
         ]
 
-        # 如果没有 ASR，用 transcript 做一个静态字幕
+    def _ass_subtitles(self, segment: dict, asr_segments: list,
+                       template: dict, out_w: int, out_h: int,
+                       seg_start: float) -> list:
+        """字幕 ASS 事件"""
+        cfg = template["layout"]["subtitle"]
+        pos_y_ratio = cfg.get("position_y_ratio", 0.80)
+        pos_y = int(out_h * pos_y_ratio)
+        max_chars = cfg.get("max_chars_per_line", 18)
+
+        # 筛选时间范围内的 ASR 句
+        seg_end = seg_start + segment["duration"]
+        seg_asr = [
+            s for s in asr_segments
+            if s.get("start", 0) >= seg_start - 0.1
+            and s.get("end", 0) <= seg_end + 0.1
+        ]
+
         if not seg_asr:
             transcript = segment.get("transcript", "")
             if transcript:
-                try:
-                    txt = TextClip(
-                        text=self._wrap_text(transcript, max_chars),
-                        font=self.font,
-                        font_size=font_size,
-                        color=color,
-                        stroke_color=stroke_color,
-                        stroke_width=stroke_w,
-                    ).with_duration(segment["duration"]).with_position(
-                        ("center", int(out_h * pos_y_ratio))
-                    )
-                    clips.append(txt)
-                except Exception:
-                    pass
-            return clips
+                text = self._escape_ass_text(self._wrap_text(transcript, max_chars))
+                return [
+                    f"Dialogue: 0,{self._sec_to_ass_time(0)},"
+                    f"{self._sec_to_ass_time(segment['duration'])},"
+                    f"Subtitle,,0,0,0,,{{\\pos({out_w//2},{pos_y})}}{text}"
+                ]
+            return []
 
-        # 逐句字幕
+        events = []
         for s in seg_asr:
             text = s.get("text", "")
             if not text:
                 continue
 
-            t_start = s["start"] - seg_start
-            t_end = s["end"] - seg_start
-            t_dur = t_end - t_start
-
-            if t_dur <= 0:
+            t_start = max(s["start"] - seg_start, 0)
+            t_end = min(s["end"] - seg_start, segment["duration"])
+            if t_end <= t_start:
                 continue
 
-            try:
-                txt = TextClip(
-                    text=self._wrap_text(text, max_chars),
-                    font=self.font,
-                    font_size=font_size,
-                    color=color,
-                    stroke_color=stroke_color,
-                    stroke_width=stroke_w,
-                ).with_duration(t_dur).with_position(
-                    ("center", int(out_h * pos_y_ratio))
-                ).with_start(t_start)
+            text = self._escape_ass_text(self._wrap_text(text, max_chars))
+            events.append(
+                f"Dialogue: 0,{self._sec_to_ass_time(t_start)},"
+                f"{self._sec_to_ass_time(t_end)},"
+                f"Subtitle,,0,0,0,,{{\\pos({out_w//2},{pos_y})}}{text}"
+            )
 
-                clips.append(txt)
-            except Exception:
-                continue
+        return events
 
-        return clips
-
-    def _make_keyword_popups(self, segment: dict, asr_segments: list,
-                             template: dict, out_w: int, out_h: int) -> list:
-        """关键词弹窗（抖音特效）"""
+    def _ass_keyword_popups(self, segment: dict, asr_segments: list,
+                            template: dict, out_w: int, out_h: int) -> list:
+        """关键词弹窗 ASS 事件"""
         cfg = template["layout"]["keyword_popup"]
         trigger_words = set(cfg.get("trigger_keywords", []))
         if not trigger_words:
             return []
 
-        font_size = int(out_h * cfg.get("font_size_ratio", 0.05))
-        color = cfg.get("color", "#FFD700")
-        stroke_color = cfg.get("stroke_color", "#CC0000")
-        stroke_w = cfg.get("stroke_width", 3)
         pos_y = int(out_h * cfg.get("position_y_ratio", 0.50))
         duration = cfg.get("duration_seconds", 1.5)
-        bg_color = cfg.get("bg_color", "rgba(255,0,0,0.8)")
 
-        clips = []
+        events = []
         popup_start = segment["start"]
 
         for s in asr_segments:
@@ -460,7 +607,6 @@ class VideoExporter:
             if not text:
                 continue
 
-            # 检测触发词
             triggered = [kw for kw in trigger_words if kw in text]
             if not triggered:
                 continue
@@ -468,196 +614,173 @@ class VideoExporter:
             t_start = s["start"] - popup_start
             if t_start < 0:
                 continue
+            t_end = t_start + duration
 
-            try:
-                # 背景
-                kw_text = triggered[0]  # 取第一个触发的关键词
-                txt_clip = TextClip(
-                    text=kw_text,
-                    font=self.font,
-                    font_size=font_size,
-                    color=color,
-                    stroke_color=stroke_color,
-                    stroke_width=stroke_w,
-                )
+            kw_text = self._escape_ass_text(triggered[0])
+            events.append(
+                f"Dialogue: 0,{self._sec_to_ass_time(t_start)},"
+                f"{self._sec_to_ass_time(t_end)},"
+                f"Popup,,0,0,0,,{{\\pos({out_w//2},{pos_y})\\fad(150,300)}}{kw_text}"
+            )
 
-                # 半透明红底
-                txt_w, txt_h = txt_clip.size if hasattr(txt_clip, 'size') else (out_w * 0.3, font_size * 1.5)
-                padding = 20
-                bg_w = txt_w + padding * 2
-                bg_h = txt_h + padding
+        return events
 
-                bg_clip = ColorClip(
-                    size=(bg_w, bg_h),
-                    color=self._parse_rgba(bg_color),
-                )
-
-                popup = CompositeVideoClip([
-                    bg_clip,
-                    txt_clip.with_position("center"),
-                ]).with_duration(duration).with_position(
-                    ("center", pos_y)
-                ).with_start(t_start).with_effects([FadeIn(0.15), FadeOut(0.3)])
-
-                clips.append(popup)
-            except Exception:
-                continue
-
-        return clips
-
-    def _make_knowledge_card(self, segment: dict, template: dict,
-                             out_w: int, out_h: int, seg_duration: float
-                             ) -> Optional[VideoFileClip]:
-        """知识卡片（B站右侧浮层）"""
+    def _ass_knowledge_card(self, segment: dict, template: dict,
+                            out_w: int, out_h: int, seg_duration: float) -> list:
+        """知识卡片 ASS 事件（B站）"""
         cfg = template["layout"]["knowledge_card"]
         if not segment.get("topic"):
-            return None
+            return []
 
-        # 从知识库获取扣分点
         deduction_points = self._get_deduction_points(segment.get("topic", ""))
         if not deduction_points:
-            return None
+            return []
 
         card_w = int(out_w * cfg.get("width_ratio", 0.30))
-        card_h = int(out_h * cfg.get("height_ratio", 0.25))
         margin_r = int(out_w * cfg.get("margin_right_ratio", 0.03))
         margin_t = int(out_h * cfg.get("margin_top_ratio", 0.12))
-        font_size = int(out_h * cfg.get("font_size_ratio", 0.025))
-        color = cfg.get("color", "#333333")
-        bg = self._parse_rgba(cfg.get("bg_color", "rgba(255,255,255,0.92)"))
-        border_color = cfg.get("border_color", "#FF6600")
+        x_pos = out_w - card_w - margin_r
+        max_lines = cfg.get("max_lines", 4)
         icon = cfg.get("icon", "💡")
         title = cfg.get("title", "扣分提示")
-        duration = cfg.get("show_duration_seconds", 5.0)
-        max_lines = cfg.get("max_lines", 4)
+        show_dur = cfg.get("show_duration_seconds", 5.0)
 
-        try:
-            # 背景
-            bg_clip = ColorClip(size=(card_w, card_h), color=bg)
+        lines = [f"{icon} {title}"] + [f"• {p}" for p in deduction_points[:max_lines]]
+        text = self._escape_ass_text("\\N".join(lines))
 
-            # 构建文字内容
-            lines = [f"{icon} {title}"] + [f"• {p}" for p in deduction_points[:max_lines]]
-            text = "\n".join(lines)
+        return [
+            f"Dialogue: 0,{self._sec_to_ass_time(1.0)},"
+            f"{self._sec_to_ass_time(1.0 + show_dur)},"
+            f"KnowledgeCard,,0,0,0,,{{\\pos({x_pos + card_w//2},{margin_t})\\fad(300,0)}}{text}"
+        ]
 
-            txt_clip = TextClip(
-                text=text,
-                font=self.font,
-                font_size=font_size,
-                color=color,
-            ).with_position((10, 10))
-
-            card = CompositeVideoClip([
-                bg_clip,
-                txt_clip,
-            ], size=(card_w, card_h)).with_duration(duration).with_position(
-                (out_w - card_w - margin_r, margin_t)
-            ).with_start(1.0).with_effects([FadeIn(0.3)])
-
-            return card
-        except Exception as e:
-            print(f"  ⚠ 知识卡片渲染失败: {e}")
-            return None
-
-    def _make_key_points_overlay(self, segment: dict, template: dict,
-                                 out_w: int, out_h: int, seg_duration: float
-                                 ) -> Optional[VideoFileClip]:
-        """要点列表覆盖（小红书右侧）"""
+    def _ass_key_points_overlay(self, segment: dict, template: dict,
+                                out_w: int, out_h: int, seg_duration: float) -> list:
+        """要点列表覆盖 ASS 事件（小红书）"""
         cfg = template["layout"]["key_points_overlay"]
         transcript = segment.get("transcript", "")
         if not transcript:
-            return None
+            return []
 
-        # 从 transcript 中提取要点（按标点分句，取前几条）
         sentences = re.split(r'[，,。！!？?；;]', transcript)
         points = [s.strip() for s in sentences if len(s.strip()) >= 4]
         max_items = cfg.get("max_items", 6)
-
         if not points:
-            return None
+            return []
 
         points = points[:max_items]
         prefix = cfg.get("item_prefix", "●")
 
         overlay_w = int(out_w * cfg.get("width_ratio", 0.35))
-        font_size = int(out_h * cfg.get("font_size_ratio", 0.028))
-        color = cfg.get("color", "#FFFFFF")
-        stroke_color = cfg.get("stroke_color", "#000000")
-        stroke_w = cfg.get("stroke_width", 2)
         margin_r = int(out_w * cfg.get("margin_right_ratio", 0.03))
         margin_t = int(out_h * cfg.get("margin_top_ratio", 0.08))
-        bg_color = cfg.get("bg_color", "rgba(0,0,0,0.6)")
-        line_spacing = cfg.get("line_spacing", 1.6)
+        x_pos = out_w - overlay_w - margin_r
 
+        lines = [f"{prefix} {p}" for p in points]
+        text = self._escape_ass_text("\\N".join(lines))
+
+        return [
+            f"Dialogue: 0,{self._sec_to_ass_time(0)},"
+            f"{self._sec_to_ass_time(seg_duration)},"
+            f"KeyPoints,,0,0,0,,{{\\pos({x_pos + overlay_w//2},{margin_t})\\fad(300,0)}}{text}"
+        ]
+
+    # ------------------------------------------------------------------
+    # 视频滤镜链
+    # ------------------------------------------------------------------
+
+    def _build_video_filters(self, source_video: str, template: dict,
+                             ass_path: str, out_w: int, out_h: int,
+                             seg_duration: float) -> list:
+        """构建 ffmpeg 视频滤镜链
+
+        Returns:
+            滤镜字符串列表，用逗号连接后传给 -vf
+        """
+        layout = template["layout"]
+        filters = []
+
+        # 1. 探测源视频分辨率
+        src_w, src_h = self._probe_resolution(source_video)
+
+        # 2. 裁切到目标比例
+        if src_w > 0 and src_h > 0:
+            target_ratio = out_w / out_h
+            src_ratio = src_w / src_h
+
+            if abs(target_ratio - src_ratio) > 0.01:
+                if target_ratio > src_ratio:
+                    # 目标更宽 → 裁切上下
+                    new_h = int(src_w / target_ratio)
+                    crop_y = (src_h - new_h) // 2
+                    filters.append(f"crop={src_w}:{new_h}:0:{crop_y}")
+                else:
+                    # 目标更高 → 裁切左右
+                    new_w = int(src_h * target_ratio)
+                    crop_x = (src_w - new_w) // 2
+                    filters.append(f"crop={new_w}:{src_h}:{crop_x}:0")
+
+        # 3. 缩放到输出分辨率
+        filters.append(f"scale={out_w}:{out_h}:flags=lanczos")
+
+        # 4. 进度条
+        if layout.get("progress_bar", {}).get("enabled"):
+            filters.append(self._filter_progress_bar(template, out_w, out_h))
+
+        # 5. ASS 字幕烧录
+        # 注意：Windows 路径中的反斜杠需转成正斜杠，冒号需转义
+        ass_path_escaped = ass_path.replace("\\", "/").replace(":", "\\:")
+        filters.append(f"ass='{ass_path_escaped}'")
+
+        # 6. 格式转换（确保兼容性）
+        filters.append("format=yuv420p")
+
+        return filters
+
+    def _probe_resolution(self, video_path: str) -> tuple:
+        """探测视频分辨率"""
         try:
-            # 构建文字
-            lines = [f"{prefix} {p}" for p in points]
-            text = "\n".join(lines)
+            ffprobe = os.environ.get("FFPROBE", "ffprobe")
+            result = subprocess.run(
+                [ffprobe, "-v", "quiet", "-print_format", "json",
+                 "-show_streams", video_path],
+                capture_output=True, text=True, timeout=15
+            )
+            info = json.loads(result.stdout)
+            for stream in info.get("streams", []):
+                if stream.get("codec_type") == "video":
+                    return stream.get("width", 0), stream.get("height", 0)
+        except Exception:
+            pass
+        return 0, 0
 
-            # 估算高度
-            line_height = int(font_size * line_spacing)
-            text_h = line_height * len(lines) + 30
-            text_h = min(text_h, out_h - margin_t - 40)
+    def _filter_progress_bar(self, template: dict, out_w: int, out_h: int) -> str:
+        """生成进度条滤镜
 
-            bg_clip = ColorClip(size=(overlay_w, text_h), color=self._parse_rgba(bg_color))
-
-            txt_clip = TextClip(
-                text=text,
-                font=self.font,
-                font_size=font_size,
-                color=color,
-                stroke_color=stroke_color,
-                stroke_width=stroke_w,
-            ).with_position((15, 15))
-
-            overlay = CompositeVideoClip([
-                bg_clip,
-                txt_clip,
-            ], size=(overlay_w, text_h)).with_duration(seg_duration).with_position(
-                (out_w - overlay_w - margin_r, margin_t)
-            ).with_effects([FadeIn(0.3)])
-
-            return overlay
-        except Exception as e:
-            print(f"  ⚠ 要点覆盖渲染失败: {e}")
-            return None
-
-    def _make_progress_bar(self, template: dict, out_w: int, out_h: int,
-                           seg_duration: float) -> Optional[VideoFileClip]:
-        """底部进度条"""
+        使用 drawbox + 动态 crop 模拟进度动画。
+        简化版：绘制固定全宽进度条（后续可做动画优化）。
+        """
         cfg = template["layout"]["progress_bar"]
         bar_h = cfg.get("height_px", 4)
-        color = cfg.get("color", "#FF4444")
-        bg_color = cfg.get("bg_color", "rgba(255,255,255,0.3)")
+        color = cfg.get("color", "#FF4444").lstrip("#")
         pos = cfg.get("position", "bottom")
 
-        try:
-            # 背景条（全宽）
-            bg_bar = ColorClip(
-                size=(out_w, bar_h),
-                color=self._parse_rgba(bg_color),
-            )
+        # ASS 颜色 → 滤镜格式
+        if len(color) == 6:
+            r, g, b = int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
+        else:
+            r, g, b = 255, 68, 68
 
-            # 进度条（从零到满宽）
-            # MoviePy 不支持直接 t 参数动画，我们用多个静态帧模拟
-            # 简化：用最终长度的静态条
-            fg_bar = ColorClip(
-                size=(out_w, bar_h),
-                color=self._parse_rgba(color),
-            ).with_duration(seg_duration)
+        y_pos = out_h - bar_h - 2 if pos == "bottom" else 2
 
-            # 简化版：全宽进度条（v2 可做动画）
-            y_pos = out_h - bar_h - 2 if pos == "bottom" else 2
-            combined = CompositeVideoClip([
-                bg_bar,
-                fg_bar,
-            ], size=(out_w, bar_h)).with_duration(seg_duration).with_position(
-                (0, y_pos)
-            )
-
-            return combined
-        except Exception as e:
-            print(f"  ⚠ 进度条渲染失败: {e}")
-            return None
+        # 半透明背景条 + 着色前景条
+        # drawbox=x:y:w:h:color:thickness  # thickness=fill 表示实心
+        return (
+            f"drawbox=0:{out_h - bar_h - 2}:{out_w}:{bar_h + 2}:"
+            f"black@0.3:t=fill,"
+            f"drawbox=0:{y_pos}:{out_w}:{bar_h}:"
+            f"0x{r:02X}{g:02X}{b:02X}@0.8:t=fill"
+        )
 
     # ------------------------------------------------------------------
     # 封面生成
@@ -671,21 +794,23 @@ class VideoExporter:
         cover_path = str(seg_dir / cfg.get("output_path", "cover.jpg"))
 
         try:
-            # 抽取第一帧
             seg_start = segment["start"]
+
+            # 抽取第一帧
+            ffmpeg = os.environ.get("FFMPEG", "ffmpeg")
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                 tmp_name = tmp.name
 
             subprocess.run([
-                "ffmpeg", "-ss", str(seg_start), "-i", source_video,
+                ffmpeg, "-ss", str(seg_start), "-i", source_video,
                 "-vframes", "1", "-q:v", "2", "-y", tmp_name,
-            ], capture_output=True, check=True)
+            ], capture_output=True, check=True, timeout=30)
 
-            # 用 Pillow 叠加标题文字
+            # 用 Pillow 叠加标题
             from PIL import Image, ImageDraw, ImageFont
 
             img = Image.open(tmp_name)
-            # 裁切为 1:1
+            # 裁切 1:1
             w, h = img.size
             crop_size = min(w, h)
             left = (w - crop_size) // 2
@@ -693,12 +818,11 @@ class VideoExporter:
             img = img.crop((left, top, left + crop_size, top + crop_size))
             img = img.resize((out_w, out_h), Image.LANCZOS)
 
-            # 叠加半透明黑色层
+            # 半透明黑色层
             overlay = Image.new("RGBA", img.size, (0, 0, 0, 100))
             img = img.convert("RGBA")
             img = Image.alpha_composite(img, overlay)
 
-            # 添加标题文字
             draw = ImageDraw.Draw(img)
             font_size = int(out_h * cfg.get("cover_text_font_size_ratio", 0.06))
             try:
@@ -707,30 +831,28 @@ class VideoExporter:
                 font = ImageFont.load_default()
 
             topic = segment.get("topic", "")
-            # 文字居中
             bbox = draw.textbbox((0, 0), topic, font=font)
             text_w = bbox[2] - bbox[0]
             text_h = bbox[3] - bbox[1]
             text_x = (out_w - text_w) // 2
             text_y = (out_h - text_h) // 2
 
-            # 描边
             stroke_w = cfg.get("cover_text_stroke_width", 3)
+            stroke_color = cfg.get("cover_text_stroke", "#000000")
+            text_color = cfg.get("cover_text_color", "#FFFFFF")
+
+            # 描边
             for dx in range(-stroke_w, stroke_w + 1):
                 for dy in range(-stroke_w, stroke_w + 1):
                     if dx == 0 and dy == 0:
                         continue
                     draw.text((text_x + dx, text_y + dy), topic,
-                              font=font, fill=cfg.get("cover_text_stroke", "#000000"))
-
-            # 主文字
-            draw.text((text_x, text_y), topic,
-                      font=font, fill=cfg.get("cover_text_color", "#FFFFFF"))
+                              font=font, fill=stroke_color)
+            draw.text((text_x, text_y), topic, font=font, fill=text_color)
 
             img = img.convert("RGB")
             img.save(cover_path, "JPEG", quality=90)
 
-            # 清理
             os.unlink(tmp_name)
             print(f"  ✓ 封面生成: {cover_path}")
             return cover_path
@@ -745,7 +867,7 @@ class VideoExporter:
 
     def _generate_copy(self, segment: dict, platform: str,
                        template: dict, seg_dir: Path) -> Optional[str]:
-        """生成各平台文案（调用 LLM）"""
+        """生成各平台发布文案"""
         copy_cfg = template.get("copy_config", {})
         if not copy_cfg.get("include_title"):
             return None
@@ -780,29 +902,24 @@ class VideoExporter:
             return None
 
     def _generate_title(self, segment: dict, platform: str) -> str:
-        """用 LLM 生成标题"""
+        """用知识库模板生成标题"""
         topic = segment.get("topic", "")
         transcript = segment.get("transcript", "")
 
-        # 先尝试用知识库模板
         knowledge = self._get_knowledge()
         templates = knowledge.get("platform_copy_templates", {}).get(platform, {}).get("title_patterns", [])
 
         if templates:
-            # 简单模板填充
             tpl = templates[0]
             title = tpl.replace("{topic}", topic)
-            # 估算要点数
             num_points = len(re.split(r'[，,。！!？?；;]', transcript))
             title = title.replace("{num_points}", str(max(1, min(num_points, 5))))
 
-            # 截断到最大长度
             max_len = knowledge.get("platform_copy_templates", {}).get(platform, {}).get("copy_config", {}).get("max_title_length", 50)
             if len(title) > max_len:
                 title = title[:max_len - 1] + "…"
             return title
 
-        # 降级：直接返回 topic
         return topic if topic else "驾考教学视频"
 
     def _generate_description(self, segment: dict, platform: str) -> str:
@@ -811,7 +928,6 @@ class VideoExporter:
         transcript = segment.get("transcript", "")
 
         if platform == "xiaohongshu":
-            # 要点列表
             sentences = [s.strip() for s in re.split(r'[，,。！!？?；;]', transcript) if len(s.strip()) >= 4]
             points = "\n".join([f"> {i+1}. {s}" for i, s in enumerate(sentences[:5])])
             return f"📝 {topic} 操作要点：\n\n{points}\n\n💾 收藏起来考前看一遍！"
@@ -853,29 +969,12 @@ class VideoExporter:
 
     def _safe_filename(self, name: str) -> str:
         """将话题名转为安全文件名"""
-        # 移除非法字符
         safe = re.sub(r'[<>:"/\\|?*]', '', name)
         safe = safe.strip().replace(" ", "_") or "segment"
         return safe
 
-    def _parse_rgba(self, color_str: str) -> tuple:
-        """解析颜色字符串为 MoviePy 可用格式"""
-        if color_str.startswith("rgba("):
-            # rgba(r, g, b, a) → (r, g, b)  # MoviePy v2 使用 0-255 RGB 或 0-1
-            parts = re.findall(r'[\d.]+', color_str)
-            if len(parts) >= 3:
-                return tuple(int(p) for p in parts[:3])
-        if color_str.startswith("#"):
-            h = color_str.lstrip("#")
-            if len(h) == 6:
-                return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-            elif len(h) == 3:
-                return tuple(int(h[i]*2, 16) for i in range(3))
-        # fallback
-        return (0, 0, 0)
-
     def _wrap_text(self, text: str, max_chars: int) -> str:
-        """文本自动换行"""
+        """文本自动换行（ASS 用 \\N）"""
         if len(text) <= max_chars:
             return text
         lines = []
@@ -887,7 +986,7 @@ class VideoExporter:
                 current = ""
         if current:
             lines.append(current)
-        return "\n".join(lines)
+        return "\\N".join(lines)
 
 
 # ------------------------------------------------------------------
@@ -896,7 +995,9 @@ class VideoExporter:
 if __name__ == "__main__":
     print(f"检测到中文字体: {_detect_chinese_font()}")
 
-    # 测试模板加载
+    encoder, params = _detect_encoder()
+    print(f"编码器: {encoder} | 参数: {params}")
+
     for p in ["douyin", "bilibili", "xiaohongshu"]:
         tpl = _load_template(p)
         print(f"[{p}] {tpl['name']} → {tpl['video']['output_resolution']}")
