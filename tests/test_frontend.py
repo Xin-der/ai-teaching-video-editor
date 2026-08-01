@@ -73,6 +73,14 @@ def test_css_has_design_tokens():
     return True
 
 
+def test_app_js_core_flow():
+    js = JS_PATH.read_text(encoding="utf-8")
+    for needle in ("generate(", "pollStatus(", "renderPlan(", "copyBlock(", "toast(",
+                   "/api/optimize", "/api/optimize/status"):
+        assert needle in js, f"app.js 缺少 {needle}"
+    return True
+
+
 def main():
     tests = [(name, fn) for name, fn in globals().items()
              if name.startswith("test_") and callable(fn)]
