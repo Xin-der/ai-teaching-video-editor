@@ -159,6 +159,7 @@ def test_cli_parser_has_optimize():
 def test_cli_optimize_text_runs():
     """--optimize --text 走 advisor 并返回（打桩，不调真实 LLM）"""
     from unittest import mock
+    import os
     import run
 
     fake_plan = {
@@ -171,7 +172,8 @@ def test_cli_optimize_text_runs():
     old_argv = sys.argv
     sys.argv = ["run.py", "--optimize", "--text", "教练说倒车入库要看点位", "--city", "长沙"]
     try:
-        with mock.patch("engine.advisor.ContentAdvisor") as M:
+        with mock.patch("engine.advisor.ContentAdvisor") as M, \
+             mock.patch.dict(os.environ, {"DASHSCOPE_API_KEY": "test"}):
             inst = M.return_value
             inst.build_plan.return_value = fake_plan
             result = run.main()
