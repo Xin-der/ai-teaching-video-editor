@@ -133,6 +133,18 @@ def test_run_optimize():
     return True
 
 
+def test_optimize_page_renders():
+    """首页渲染优化工具页面"""
+    from web.app import app
+    client = app.test_client()
+    resp = client.get("/")
+    assert resp.status_code == 200, f"状态码 {resp.status_code}"
+    body = resp.get_data(as_text=True)
+    assert "内容优化" in body, "页面缺少标题"
+    assert "生成方案" in body, "页面缺少生成按钮"
+    return True
+
+
 def main():
     tests = [(name, fn) for name, fn in globals().items()
              if name.startswith("test_") and callable(fn)]

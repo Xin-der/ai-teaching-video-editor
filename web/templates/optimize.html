@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>驾校内容优化工具</title>
+<style>
+:root { --bg:#0f0f0f; --surface:#1a1a1a; --border:#2a2a2a; --text:#e0e0e0; --text2:#999; --accent:#ff4444; --accent2:#00a8ff; --green:#4caf50; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,"Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+.header { background:var(--surface); border-bottom:1px solid var(--border); padding:12px 24px; display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:100; }
+.header h1 { font-size:18px; font-weight:600; }
+.container { max-width:900px; margin:0 auto; padding:24px; }
+.card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px; margin-bottom:16px; }
+.card h2 { font-size:15px; margin-bottom:14px; }
+label { display:block; font-size:13px; color:var(--text2); margin:14px 0 6px; }
+.input { width:100%; background:#111; border:1px solid var(--border); border-radius:8px; padding:12px; color:var(--text); font-family:"Microsoft YaHei",sans-serif; font-size:14px; }
+textarea.input { min-height:120px; resize:vertical; }
+.row { display:flex; gap:12px; align-items:flex-end; }
+.row > div { flex:1; }
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:10px 20px; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
+.btn-primary { background:var(--accent); color:#fff; width:100%; margin-top:16px; }
+.btn-primary:disabled { background:#444; cursor:not-allowed; }
+.btn-sm { padding:6px 12px; font-size:12px; border-radius:6px; }
+.btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
+.btn-outline:hover { border-color:var(--accent2); }
+.field { display:flex; gap:10px; margin-bottom:8px; font-size:13px; line-height:1.6; }
+.field .k { flex-shrink:0; color:var(--text2); min-width:70px; }
+.muted { color:var(--text2); font-size:12px; }
+.progress { display:none; margin-top:12px; }
+.progress-text { font-size:12px; color:var(--text2); }
+#result { display:none; }
+.copy-row { margin-top:8px; text-align:right; }
+.toast { position:fixed; bottom:24px; right:24px; background:var(--green); color:#fff; padding:12px 20px; border-radius:8px; font-size:14px; z-index:300; display:none; }
+.toast.error { background:var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🚗 驾校内容优化工具</h1>
+  <span class="muted">上传视频 → 得到可直接照着改、照着发的方案</span>
+</div>
+
+<div class="container">
+  <div class="card">
+    <h2>📤 输入内容</h2>
+    <label>上传视频（原始素材/剪辑过均可，需有说话内容）</label>
+    <input type="file" id="video-file" class="input" accept="video/*">
+    <label>或粘贴文字（脚本/简介/口述）</label>
+    <textarea id="input-text" class="input" placeholder="把视频内容粘贴到这里，二选一"></textarea>
+    <div class="row">
+      <div>
+        <label>所在城市（可选，用于同城关键词）</label>
+        <input type="text" id="city" class="input" placeholder="如：长沙">
+      </div>
+      <div>
+        <label>目标平台</label>
+        <select id="platform" class="input">
+          <option value="douyin">抖音</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="gen-btn" onclick="generate()">✨ 生成方案</button>
+    <div class="progress" id="progress">
+      <div class="progress-text" id="progress-text">准备生成...</div>
+    </div>
+  </div>
+
+  <div id="result"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let currentPlan = null;
+let pollTimer = null;
+const KEYS = ['diagnosis', 'script_rewrite', 'packaging', 'conversion', 'next_topics'];
+
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('gen-btn');
+  const file = document.getElementById('video-file');
+  const text = document.getElementById('input-text');
+  const sync = () => { btn.disabled = !(file.files.length || text.value.trim()); };
+  file.addEventListener('change', sync);
+  text.addEventListener('input', sync);
+  sync();
+});
+
+async function generate() {
+  const file = document.getElementById('video-file').files[0];
+  const text = document.getElementById('input-text').value.trim();
+  const city = document.getElementById('city').value.trim();
+  const platform = document.getElementById('platform').value;
+  if (!file && !text) { toast('请选择视频或粘贴文字', true); return; }
+
+  const btn = document.getElementById('gen-btn');
+  btn.disabled = true;
+  document.getElementById('result').style.display = 'none';
+  document.getElementById('progress').style.display = 'block';
+  document.getElementById('progress-text').textContent = '准备生成...';
+
+  let res;
+  try {
+    if (file) {
+      const fd = new FormData();
+      fd.append('video', file);
+      fd.append('city', city);
+      fd.append('platform', platform);
+      res = await fetch('/api/optimize', { method: 'POST', body: fd });
+    } else {
+      res = await fetch('/api/optimize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, city, platform }),
+      });
+    }
+    if (!res.ok) {
+      const e = await res.json();
+      throw new Error(e.error || '提交失败');
+    }
+    pollStatus();
+  } catch (e) {
+    toast(e.message, true);
+    btn.disabled = false;
+    document.getElementById('progress').style.display = 'none';
+  }
+}
+
+function pollStatus() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    try {
+      const s = await (await fetch('/api/optimize/status')).json();
+      document.getElementById('progress-text').textContent = s.progress || '';
+      if (s.error) {
+        clearInterval(pollTimer);
+        toast(s.error, true);
+        resetBtn();
+        return;
+      }
+      if (s.plan) {
+        clearInterval(pollTimer);
+        currentPlan = s.plan;
+        renderPlan(s.plan);
+        resetBtn();
+      }
+    } catch (e) { console.error(e); }
+  }, 1000);
+}
+
+function resetBtn() {
+  document.getElementById('gen-btn').disabled = false;
+  setTimeout(() => { document.getElementById('progress').style.display = 'none'; }, 500);
+}
+
+function renderPlan(plan) {
+  const box = document.getElementById('result');
+  box.style.display = 'block';
+  box.innerHTML = [
+    planCard('① 诊断', renderObj(plan.diagnosis), 0),
+    planCard('② 脚本改写', renderObj(plan.script_rewrite), 1),
+    planCard('③ 包装', renderObj(plan.packaging), 2),
+    planCard('④ 转化话术', renderObj(plan.conversion), 3),
+    planCard('⑤ 下期选题', renderTopics(plan.next_topics), 4),
+  ].join('');
+  box.scrollIntoView({ behavior: 'smooth' });
+}
+
+function planCard(title, html, idx) {
+  return `<div class="card"><h2>${title}</h2>${html}
+    <div class="copy-row"><button class="btn btn-sm btn-outline" onclick="copyBlock(${idx})">📋 复制</button></div>
+  </div>`;
+}
+
+function renderObj(obj) {
+  if (!obj || !Object.keys(obj).length) return '<p class="muted">（无）</p>';
+  return Object.entries(obj).map(([k, v]) => {
+    if (Array.isArray(v)) v = v.join('；');
+    return `<p class="field"><span class="k">${esc(k)}</span><span class="v">${esc(String(v))}</span></p>`;
+  }).join('');
+}
+
+function renderTopics(list) {
+  if (!list || !list.length) return '<p class="muted">（无）</p>';
+  return list.map(t =>
+    `<p class="field"><span class="k">选题</span><span class="v">${esc(t.title || '')} — ${esc(t.why || '')}</span></p>`
+  ).join('');
+}
+
+function copyBlock(idx) {
+  const data = currentPlan ? currentPlan[KEYS[idx]] : null;
+  const text = fmtBlock(data);
+  if (!text) { toast('没有可复制的内容', true); return; }
+  navigator.clipboard.writeText(text).then(() => toast('已复制 ✅')).catch(() => toast('复制失败', true));
+}
+
+function fmtBlock(obj) {
+  if (Array.isArray(obj)) {
+    return obj.map(t => `${t.title || ''}：${t.why || ''}`).join('\n');
+  }
+  if (!obj) return '';
+  const names = { summary:'诊断', issues:'问题', strengths:'优点', hook:'开头3秒', body:'主体', proof:'证明', cta:'引导', title:'标题', cover_text:'封面文字', description:'简介', pinned_comment:'置顶评论', profile_bio:'主页简介', dm_opening:'私信开场白' };
+  return Object.entries(obj).map(([k, v]) => {
+    if (Array.isArray(v)) v = v.join('；');
+    return `${names[k] || k}：${v}`;
+  }).join('\n');
+}
+
+function toast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.toggle('error', !!isError);
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 2500);
+}
+
+function esc(s) { return (s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+</script>
+
+</body>
+</html>

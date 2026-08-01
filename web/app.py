@@ -43,8 +43,8 @@ _video_info_cache = None
 
 @app.route("/")
 def index():
-    """主页面"""
-    return render_template("index.html")
+    """主页面：内容优化工具"""
+    return render_template("optimize.html")
 
 
 # ---------------------------------------------------------------------------
