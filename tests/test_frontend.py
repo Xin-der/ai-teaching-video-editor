@@ -81,6 +81,13 @@ def test_app_js_core_flow():
     return True
 
 
+def test_app_js_history():
+    js = JS_PATH.read_text(encoding="utf-8")
+    for needle in ("optimize_history", "localStorage", "renderHistory", "viewHistory", "deleteHistory"):
+        assert needle in js, f"app.js 缺少 {needle}"
+    return True
+
+
 def main():
     tests = [(name, fn) for name, fn in globals().items()
              if name.startswith("test_") and callable(fn)]

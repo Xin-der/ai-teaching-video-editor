@@ -139,6 +139,55 @@ function toast(msg, isError) {
 
 function esc(s) { return (s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+function loadHistory() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); }
+  catch (e) { return []; }
+}
+
+function saveHistory(plan) {
+  const list = loadHistory();
+  list.unshift({ ts: Date.now(), plan });
+  if (list.length > HISTORY_MAX) list.length = HISTORY_MAX;
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+  renderHistory();
+}
+
+function renderHistory() {
+  const list = loadHistory();
+  const box = document.getElementById('history-list');
+  if (!box) return;
+  if (!list.length) { box.innerHTML = '<p class="muted">还没有历史方案，生成一份试试。</p>'; return; }
+  box.innerHTML = list.map((item, i) => {
+    const d = new Date(item.ts);
+    const pad = n => String(n).padStart(2, '0');
+    const time = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const summary = (item.plan.diagnosis && item.plan.diagnosis.summary) || '（方案）';
+    return `<div class="history-item">
+      <span class="history-time">${time}</span>
+      <span class="history-summary">${esc(summary)}</span>
+      <span class="history-actions">
+        <button class="btn btn-outline btn-sm" onclick="viewHistory(${i})">查看</button>
+        <button class="btn btn-outline btn-sm btn-danger" onclick="deleteHistory(${i})">删除</button>
+      </span>
+    </div>`;
+  }).join('');
+}
+
+function viewHistory(i) {
+  const list = loadHistory();
+  const item = list[i];
+  if (!item) return;
+  currentPlan = item.plan;
+  renderPlan(item.plan);
+}
+
+function deleteHistory(i) {
+  const list = loadHistory();
+  list.splice(i, 1);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+  renderHistory();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const btn = document.getElementById('gen-btn');
   const file = document.getElementById('video-file');
@@ -168,4 +217,5 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   btn.addEventListener('click', generate);
   sync();
+  renderHistory();
 });
