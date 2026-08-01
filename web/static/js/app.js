@@ -68,7 +68,13 @@ function pollStatus() {
         resetBtn();
         hideProgress();
       }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      clearInterval(pollTimer);
+      toast('获取进度失败，请重试', true);
+      resetBtn();
+      hideProgress();
+    }
   }, 1000);
 }
 
@@ -109,6 +115,7 @@ function copyBlock(idx) {
   const data = currentPlan ? currentPlan[KEYS[idx]] : null;
   const text = fmtBlock(data);
   if (!text) { toast('没有可复制的内容', true); return; }
+  if (!navigator.clipboard) { toast('复制失败（需 HTTPS 或 localhost 访问）', true); return; }
   navigator.clipboard.writeText(text).then(() => toast('已复制 ✅')).catch(() => toast('复制失败', true));
 }
 
@@ -140,8 +147,10 @@ function toast(msg, isError) {
 function esc(s) { return (s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
 function loadHistory() {
-  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); }
-  catch (e) { return []; }
+  try {
+    const list = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch (e) { return []; }
 }
 
 function saveHistory(plan) {
@@ -161,7 +170,7 @@ function renderHistory() {
     const d = new Date(item.ts);
     const pad = n => String(n).padStart(2, '0');
     const time = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    const summary = (item.plan.diagnosis && item.plan.diagnosis.summary) || '（方案）';
+    const summary = (item.plan && item.plan.diagnosis && item.plan.diagnosis.summary) || '（方案）';
     return `<div class="history-item">
       <span class="history-time">${time}</span>
       <span class="history-summary">${esc(summary)}</span>
