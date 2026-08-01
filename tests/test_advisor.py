@@ -52,6 +52,60 @@ def test_plan_validation():
     return True
 
 
+def test_build_plan_no_input():
+    """无视频无文字 → 返回 error"""
+    from engine.advisor import ContentAdvisor
+    advisor = ContentAdvisor(work_dir="work")
+    result = advisor.build_plan()
+    assert "error" in result, "应返回 error"
+    return True
+
+
+def test_build_plan_text_only():
+    """纯文字输入 → 传给 analyzer 并返回方案（打桩）"""
+    from unittest import mock
+    from engine.advisor import ContentAdvisor
+
+    fake_plan = {
+        "diagnosis": {"summary": "诊断", "issues": ["x"], "strengths": ["y"]},
+        "script_rewrite": {"hook": "", "body": "", "proof": "", "cta": ""},
+        "packaging": {"title": "", "cover_text": "", "description": ""},
+        "conversion": {"pinned_comment": "", "profile_bio": "", "dm_opening": ""},
+        "next_topics": [],
+    }
+    advisor = ContentAdvisor(work_dir="work")
+    with mock.patch("engine.analyzer.ContentAnalyzer") as M:
+        inst = M.return_value
+        inst.generate_optimization_plan.return_value = fake_plan
+        result = advisor.build_plan(text="教练说倒车入库一定要看点位")
+        assert result == fake_plan, "应直接返回 analyzer 的方案"
+        transcript_arg = inst.generate_optimization_plan.call_args[0][0]
+        assert "倒车入库" in transcript_arg, "transcript 未透传"
+    return True
+
+
+def test_write_plan_markdown():
+    """markdown 文件包含 5 块标题"""
+    import tempfile
+    from engine.advisor import write_plan_markdown
+
+    plan = {
+        "diagnosis": {"summary": "诊断", "issues": ["没钩子"], "strengths": ["教学清晰"]},
+        "script_rewrite": {"hook": "开头", "body": "主体", "proof": "证明", "cta": "引导"},
+        "packaging": {"title": "标题", "cover_text": "封面", "description": "简介"},
+        "conversion": {"pinned_comment": "置顶", "profile_bio": "主页", "dm_opening": "私信"},
+        "next_topics": [{"title": "选题1", "why": "原因1"}],
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        out = write_plan_markdown(plan, f"{tmp}/plan.md")
+        assert out.endswith("plan.md")
+        with open(out, "r", encoding="utf-8") as f:
+            content = f.read()
+        for sec in ("① 诊断", "② 脚本改写", "③ 包装", "④ 转化话术", "⑤ 下期选题"):
+            assert sec in content, f"缺少 {sec}"
+    return True
+
+
 def main():
     tests = [(name, fn) for name, fn in globals().items()
              if name.startswith("test_") and callable(fn)]
