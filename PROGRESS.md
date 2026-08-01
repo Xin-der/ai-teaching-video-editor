@@ -20,6 +20,12 @@
 - `tests/test_advisor.py`：10 个单元测试（TDD）
 - 集成验收：CLI 文字/视频模式 + Web 全流程真实调用均通过
 
+### v3.1 前端重构（浅色商务风 MVP 产品站）
+- 2026-08-01 前端从暗色单页工具重构为浅色商务风单页产品站（Hero/三步/工具/五块说明/Footer）
+- 样式与逻辑拆分至 `web/static/css/style.css` + `web/static/js/app.js`，`web/app.py` 零改动
+- 新增本地历史方案（localStorage，最多 20 条）
+- `tests/test_frontend.py` 8 项回归通过；`tests/test_advisor.py` 仍 10/10
+
 ### v2（已废弃）: 多平台智能切片工具
 目标：AI 学一次剪辑风格，自动渲染完整 mp4。
 **废弃原因**: 模拟剪辑审美技术难度过高、流程硬编码严重、10小时渲染仍不正确。
