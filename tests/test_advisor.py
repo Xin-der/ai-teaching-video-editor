@@ -106,6 +106,33 @@ def test_write_plan_markdown():
     return True
 
 
+def test_run_optimize():
+    """_run_optimize 成功路径：设置 plan 和 markdown_path"""
+    from unittest import mock
+    import web.app as app_mod
+
+    fake_plan = {
+        "diagnosis": {"summary": "诊断", "issues": [], "strengths": []},
+        "script_rewrite": {"hook": "", "body": "", "proof": "", "cta": ""},
+        "packaging": {"title": "", "cover_text": "", "description": ""},
+        "conversion": {"pinned_comment": "", "profile_bio": "", "dm_opening": ""},
+        "next_topics": [],
+    }
+    with mock.patch("engine.advisor.ContentAdvisor") as M, \
+         mock.patch("engine.advisor.write_plan_markdown") as W:
+        inst = M.return_value
+        inst.build_plan.return_value = fake_plan
+        W.return_value = "/fake/plan.md"
+
+        app_mod._optimize_status = {"running": True, "progress": "", "plan": None, "error": None, "markdown_path": None}
+        app_mod._run_optimize({"text": "测试文字", "city": "长沙", "platform": "douyin"})
+
+    assert app_mod._optimize_status["plan"] == fake_plan, "plan 未写入状态"
+    assert app_mod._optimize_status["markdown_path"] == "/fake/plan.md", "markdown 路径未写入"
+    assert app_mod._optimize_status["running"] is False, "running 未复位"
+    return True
+
+
 def main():
     tests = [(name, fn) for name, fn in globals().items()
              if name.startswith("test_") and callable(fn)]
