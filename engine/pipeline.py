@@ -20,6 +20,11 @@ import time
 from pathlib import Path
 from typing import Optional
 
+# Fix Unicode emoji output on Windows
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+
 import numpy as np
 from dotenv import load_dotenv
 
@@ -68,6 +73,7 @@ class Pipeline:
         self.frames_dir = self.work_dir / "frames"
         self.descriptions_path = self.work_dir / "frame_descriptions.json"
         self.segments_path = self.work_dir / "segments.json"
+        self.analysis_path = self.work_dir / "content_analysis.json"
 
         # 状态
         self.video_duration: float = 0.0
@@ -75,6 +81,7 @@ class Pipeline:
         self.scenes: list = []
         self.frame_descriptions: list = []
         self.merged_segments: list = []
+        self.content_analysis: dict = {}
 
         # 子模块
         self._scorer: Optional[SegmentScorer] = None
@@ -89,6 +96,7 @@ class Pipeline:
             skip_asr: bool = False,
             skip_scenes: bool = False,
             skip_vlm: bool = False,
+            skip_llm: bool = False,
             ) -> list:
         """执行完整管线
 
@@ -97,6 +105,7 @@ class Pipeline:
             skip_asr:    跳过 ASR（使用已有 work/asr_result.json）
             skip_scenes: 跳过场景检测（使用已有 work/scenes.json + frames/）
             skip_vlm:    跳过 VLM 描述（使用已有 work/frame_descriptions.json）
+            skip_llm:    跳过 LLM 内容分析（使用已有 work/content_analysis.json）
 
         Returns:
             合并后的片段列表，每个片段含评分
@@ -140,6 +149,13 @@ class Pipeline:
             print("\n[Step 5] ⏭ 跳过 VLM 描述（使用缓存）")
             self._load_descriptions()
 
+        # Step 5.5: LLM 内容分析
+        if not skip_llm:
+            self._analyze_content()
+        else:
+            print("\n[Step 5.5] ⏭ 跳过 LLM 内容分析（使用缓存）")
+            self._load_analysis()
+
         # Step 6: 智能合并分段
         print("\n" + "=" * 60)
         print("  [Step 6] 智能分段合并...")
@@ -159,6 +175,18 @@ class Pipeline:
 
         self._save_segments()
         return self.merged_segments
+
+    def extract_transcript(self) -> list:
+        """公开：音频提取 + ASR 转录，返回 ASR 段列表 [{start, end, text}, ...]"""
+        self._extract_audio()
+        self._run_asr()
+        return self.asr_segments
+
+    def extract_visuals(self) -> list:
+        """公开：场景检测 + 关键帧抽取 + VLM 描述，返回帧描述列表"""
+        self._detect_scenes()
+        self._describe_frames()
+        return self.frame_descriptions
 
     # ------------------------------------------------------------------
     # Step 1: 视频探测
@@ -240,25 +268,27 @@ class Pipeline:
         duration = len(audio_data) / sr
         print(f"  音频时长: {duration:.1f}s")
 
-        # 每 60 秒一段
+        # 每 60 秒一段，5s 重叠避免边界切断
         CHUNK_SEC = 60
+        OVERLAP_SEC = 5
         chunk_samples = CHUNK_SEC * sr
-        total_chunks = (len(audio_data) + chunk_samples - 1) // chunk_samples
+        overlap_samples = OVERLAP_SEC * sr
+        step_samples = chunk_samples - overlap_samples  # 实际步进 55s
+        total_chunks = max(1, (len(audio_data) - overlap_samples + step_samples - 1) // step_samples)
 
         all_segments = []
-        time_offset = 0.0
 
         for i in range(total_chunks):
-            start_idx = i * chunk_samples
+            start_idx = i * step_samples
             end_idx = min(start_idx + chunk_samples, len(audio_data))
             chunk = audio_data[start_idx:end_idx]
             chunk_dur = len(chunk) / sr
+            time_offset = start_idx / sr
 
-            # 跳过静音段
+            # 跳过静音段（降低阈值以捕获更多有效语音）
             rms = np.sqrt(np.mean(chunk ** 2))
-            if rms < 0.01:
+            if rms < 0.003:
                 print(f"  [{i+1}/{total_chunks}] {time_offset:.0f}s-{time_offset+chunk_dur:.0f}s 静音跳过")
-                time_offset += chunk_dur
                 continue
 
             print(f"  [{i+1}/{total_chunks}] {time_offset:.0f}s-{time_offset+chunk_dur:.0f}s ...", end=" ", flush=True)
@@ -275,7 +305,6 @@ class Pipeline:
 
                     if text and timestamps:
                         words = text.split()
-                        # 按标点切句
                         seg_texts, seg_times = self._parse_asr_timestamps(words, timestamps)
 
                         for seg_text, (st, et) in zip(seg_texts, seg_times):
@@ -295,14 +324,16 @@ class Pipeline:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
 
-            time_offset += chunk_dur
+        # 后处理：排序、合并短句、去重
+        all_segments.sort(key=lambda s: s["start"])
+        all_segments = self._postprocess_asr(all_segments)
 
         self.asr_segments = all_segments
         with open(self.asr_result_path, "w", encoding="utf-8") as f:
             json.dump({"segments": all_segments, "total": len(all_segments)},
                       f, ensure_ascii=False, indent=2)
 
-        print(f"  ASR 完成! 共 {len(all_segments)} 句")
+        print(f"  ASR 完成! 共 {len(all_segments)} 句（后处理后）")
 
     def _parse_asr_timestamps(self, words: list, timestamps: list) -> tuple:
         """解析 ASR timestamp，按标点 + 长度切句"""
@@ -339,6 +370,46 @@ class Pipeline:
             seg_times.append((buf_start, buf_end))
 
         return seg_texts, seg_times
+
+    def _postprocess_asr(self, segments: list) -> list:
+        """ASR 后处理：轻量级清理（不去破坏原始句子边界）
+
+        1. 过滤 < 0.15s 的孤立单词（如单独的"啊""嗯"）
+        2. 去重 chunk 重叠造成的完全重复相邻句
+        """
+        if not segments:
+            return segments
+
+        # 第 1 步：过滤太短的孤立词
+        filtered = []
+        for seg in segments:
+            dur = seg["end"] - seg["start"]
+            text = seg["text"].strip()
+            if dur < 0.15 and len(text) <= 2:
+                continue
+            filtered.append(seg)
+
+        # 第 2 步：去重 chunk 重叠造成的重复识别
+        if len(filtered) <= 1:
+            return filtered
+
+        deduped = [filtered[0]]
+        for seg in filtered[1:]:
+            prev = deduped[-1]
+            # 只合并完全重叠且文本高度相似的（chunk overlap 造成）
+            time_overlap = seg["start"] <= prev["start"] + 0.5
+            text_similar = (
+                seg["text"] in prev["text"] or prev["text"] in seg["text"]
+            )
+            if time_overlap and text_similar:
+                # 保留更长文本、更宽时间范围
+                deduped[-1]["end"] = max(prev["end"], seg["end"])
+                if len(seg["text"]) > len(prev["text"]):
+                    deduped[-1]["text"] = seg["text"]
+                continue
+            deduped.append(seg)
+
+        return deduped
 
     def _load_asr(self):
         """加载缓存的 ASR 结果"""
@@ -425,20 +496,34 @@ class Pipeline:
     # ------------------------------------------------------------------
 
     def _describe_frames(self):
-        """用 qwen3.7-plus 多模态描述每张关键帧"""
+        """用 qwen3.7-plus 多模态描述关键帧（采样模式）"""
         print(f"\n[Step 5] VLM 关键帧描述 (qwen3.7-plus)...")
 
         if self.descriptions_path.exists():
             self._load_descriptions()
             return
 
-        # 收集需要描述的关键帧
-        frame_files = sorted(self.frames_dir.glob("*.jpg"))
-        if not frame_files:
+        # 收集所有关键帧
+        all_frame_files = sorted(self.frames_dir.glob("*.jpg"))
+        if not all_frame_files:
             print("  ⚠ 没有关键帧文件，跳过 VLM 描述")
             return
 
-        print(f"  待描述: {len(frame_files)} 帧")
+        # 采样：最多每 3 帧取 1 帧，保底首尾，减少 API 调用
+        MAX_VLM_CALLS = 6
+        if len(all_frame_files) <= MAX_VLM_CALLS:
+            frame_files = all_frame_files
+        else:
+            step = max(2, len(all_frame_files) // MAX_VLM_CALLS)
+            frame_files = all_frame_files[::step]
+            # 确保首尾包含
+            if all_frame_files[0] not in frame_files:
+                frame_files.insert(0, all_frame_files[0])
+            if all_frame_files[-1] not in frame_files:
+                frame_files.append(all_frame_files[-1])
+            frame_files = list(dict.fromkeys(frame_files))  # 去重保序
+
+        print(f"  待描述: {len(frame_files)} 帧 (从 {len(all_frame_files)} 帧中采样)")
 
         client = self._get_openai_client()
         self.frame_descriptions = []
@@ -531,6 +616,60 @@ class Pipeline:
             with open(self.descriptions_path, "r", encoding="utf-8") as f:
                 self.frame_descriptions = json.load(f)
             print(f"  加载 {len(self.frame_descriptions)} 条帧描述")
+
+    # ------------------------------------------------------------------
+    # Step 5.5: LLM 内容分析
+    # ------------------------------------------------------------------
+
+    def _analyze_content(self):
+        """LLM 分析 ASR transcript + VLM 摘要，提取知识点和结构"""
+        print(f"\n[Step 5.5] LLM 内容分析 (qwen3.7-plus 文本模式)...")
+
+        if self.analysis_path.exists():
+            self._load_analysis()
+            return
+
+        from engine.analyzer import ContentAnalyzer
+
+        # 构建 VLM 摘要
+        topics = list(set(
+            fd.get("topic", "") for fd in self.frame_descriptions
+            if fd.get("topic")
+        ))
+        vlm_summary = {"topics": topics}
+
+        # 获取完整 transcript
+        full_transcript = " ".join(
+            s.get("text", "") for s in self.asr_segments
+        )
+        if not full_transcript:
+            print("  ⚠ 没有 transcript，跳过 LLM 分析")
+            self.content_analysis = {"knowledge_points": [], "teaching_style": {}}
+            return
+
+        analyzer = ContentAnalyzer()
+        try:
+            self.content_analysis = analyzer.analyze(
+                asr_transcript=full_transcript,
+                vlm_summary=vlm_summary,
+                video_duration=self.video_duration,
+            )
+            print(f"  提取到 {len(self.content_analysis.get('knowledge_points', []))} 个知识点")
+
+            # 缓存
+            with open(self.analysis_path, "w", encoding="utf-8") as f:
+                json.dump(self.content_analysis, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"  ⚠ LLM 分析失败: {e}，使用规则评分")
+            self.content_analysis = {"knowledge_points": [], "teaching_style": {}}
+
+    def _load_analysis(self):
+        """加载缓存的 LLM 分析结果"""
+        if self.analysis_path.exists():
+            with open(self.analysis_path, "r", encoding="utf-8") as f:
+                self.content_analysis = json.load(f)
+            kp_count = len(self.content_analysis.get("knowledge_points", []))
+            print(f"  加载 {kp_count} 个知识点")
 
     # ------------------------------------------------------------------
     # Step 6: 智能分段合并
