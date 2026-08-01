@@ -19,13 +19,19 @@ import argparse
 import os
 import sys
 
+# Fix Unicode emoji output on Windows
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+
 from dotenv import load_dotenv
 load_dotenv()
 
 from engine import Pipeline
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
+    """构建命令行参数解析器"""
     parser = argparse.ArgumentParser(
         description="多平台智能切片工具 — 长教学视频 → 智能切片 → 多平台导出 + 文案",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -33,12 +39,11 @@ def main():
 示例:
   python run.py input/video.mp4                    分段预览
   python run.py input/video.mp4 --export            分段 + 全平台导出
-  python run.py input/video.mp4 --platforms douyin  只看抖音导出
-  python run.py input/video.mp4 --skip-asr          跳过 ASR 用缓存
+  python run.py input/video.mp4 --optimize          内容优化（出方案）
+  python run.py --optimize --text "粘贴内容"        文字内容优化
         """,
     )
-
-    parser.add_argument("video", help="输入视频路径")
+    parser.add_argument("video", nargs="?", help="输入视频路径（使用 --web 时可选）")
     parser.add_argument("--output-dir", default="output", help="输出目录 (默认: output)")
     parser.add_argument("--work-dir", default="work", help="工作目录 (默认: work)")
 
@@ -47,6 +52,7 @@ def main():
     parser.add_argument("--skip-asr", action="store_true", help="跳过 ASR 语音识别")
     parser.add_argument("--skip-scenes", action="store_true", help="跳过场景检测")
     parser.add_argument("--skip-vlm", action="store_true", help="跳过 VLM 关键帧描述")
+    parser.add_argument("--skip-llm", action="store_true", help="跳过 LLM 内容分析")
     parser.add_argument("--skip-all", action="store_true", help="跳过所有分析步骤")
 
     # 导出
@@ -59,11 +65,48 @@ def main():
                         help="交互模式：分段后等待确认再导出")
     parser.add_argument("--only-export", action="store_true",
                         help="仅导出（不运行管线，使用已有分段结果）")
+    parser.add_argument("--web", action="store_true",
+                        help="启动 Web 预览界面（本地浏览器）")
+    parser.add_argument("--web-port", type=int, default=5000,
+                        help="Web 界面端口 (默认: 5000)")
 
-    args = parser.parse_args()
+    # 内容优化
+    parser.add_argument("--optimize", action="store_true",
+                        help="内容优化模式：视频/文字 → 《内容优化方案》")
+    parser.add_argument("--city", default="", help="所在城市（用于同城关键词）")
+    parser.add_argument("--text", default="", help="直接输入文字内容（代替视频）")
+    return parser
 
-    # 检查视频文件
-    if not os.path.exists(args.video):
+
+def main():
+    args = build_parser().parse_args()
+
+    # --- Web 界面模式 ---
+    if args.web:
+        try:
+            from web.app import app, OUTPUT_DIR
+            import webbrowser
+            print(f"\n🌐 启动 Web 界面 → http://127.0.0.1:{args.web_port}")
+            print(f"   按 Ctrl+C 停止\n")
+            # 自动打开浏览器
+            webbrowser.open(f"http://127.0.0.1:{args.web_port}")
+            app.run(host="127.0.0.1", port=args.web_port, debug=False)
+        except ImportError as e:
+            print(f"❌ 无法启动 Web 界面: {e}")
+            print("   请先安装 Flask: py -3.12 -m pip install flask")
+            sys.exit(1)
+        return
+
+    # 检查视频文件（--optimize --text 模式可无视频）
+    if not args.video and not (args.optimize and args.text):
+        print("❌ 请指定视频文件")
+        print(f"\n用法:")
+        print(f"   python run.py <视频路径>             运行管线")
+        print(f"   python run.py <视频路径> --export     管线 + 导出")
+        print(f"   python run.py --web                   启动 Web 预览界面")
+        print(f"   python run.py --optimize --text \"...\"  文字内容优化")
+        sys.exit(1)
+    if args.video and not os.path.exists(args.video):
         print(f"❌ 找不到视频文件: {args.video}")
         print(f"\n💡 请将视频放入 input/ 目录，然后运行:")
         print(f"   python run.py input/你的视频.mp4")
@@ -74,6 +117,23 @@ def main():
         print("❌ 未设置 DASHSCOPE_API_KEY")
         print("   请在 .env 文件中配置 API Key")
         sys.exit(1)
+
+    # --- 内容优化模式 ---
+    if args.optimize:
+        import json as _json
+        from engine.advisor import ContentAdvisor
+
+        print("🚀 内容优化模式...")
+        advisor = ContentAdvisor(work_dir=args.work_dir)
+        plan = advisor.build_plan(
+            video_path=args.video,
+            text=args.text or None,
+            city=args.city,
+        )
+        print(_json.dumps(plan, ensure_ascii=False, indent=2))
+        if plan.get("error"):
+            sys.exit(1)
+        return
 
     # --- 仅导出模式 ---
     if args.only_export:
@@ -105,6 +165,7 @@ def main():
         skip_asr=skip_all or args.skip_asr,
         skip_scenes=skip_all or args.skip_scenes,
         skip_vlm=skip_all or args.skip_vlm,
+        skip_llm=skip_all or args.skip_llm,
     )
 
     if not segments:

@@ -145,6 +145,43 @@ def test_optimize_page_renders():
     return True
 
 
+def test_cli_parser_has_optimize():
+    """run.py 参数包含 --optimize/--city/--text"""
+    import run
+    p = run.build_parser()
+    args = p.parse_args(["--optimize", "--text", "一段驾考教学", "--city", "长沙"])
+    assert args.optimize is True, "--optimize 未解析"
+    assert args.text == "一段驾考教学", "--text 未解析"
+    assert args.city == "长沙", "--city 未解析"
+    return True
+
+
+def test_cli_optimize_text_runs():
+    """--optimize --text 走 advisor 并返回（打桩，不调真实 LLM）"""
+    from unittest import mock
+    import run
+
+    fake_plan = {
+        "diagnosis": {"summary": "ok", "issues": [], "strengths": []},
+        "script_rewrite": {"hook": "", "body": "", "proof": "", "cta": ""},
+        "packaging": {"title": "", "cover_text": "", "description": ""},
+        "conversion": {"pinned_comment": "", "profile_bio": "", "dm_opening": ""},
+        "next_topics": [],
+    }
+    old_argv = sys.argv
+    sys.argv = ["run.py", "--optimize", "--text", "教练说倒车入库要看点位", "--city", "长沙"]
+    try:
+        with mock.patch("engine.advisor.ContentAdvisor") as M:
+            inst = M.return_value
+            inst.build_plan.return_value = fake_plan
+            result = run.main()
+        assert result is None, f"main() 应正常返回, 得到 {result}"
+        inst.build_plan.assert_called_once()
+    finally:
+        sys.argv = old_argv
+    return True
+
+
 def main():
     tests = [(name, fn) for name, fn in globals().items()
              if name.startswith("test_") and callable(fn)]
