@@ -35,14 +35,14 @@
     },
     "subtitle": {
       "enabled": true,
-      "font_size_ratio": 0.045,
+      "font_size_ratio": 0.038,
       "font": "SimHei",
       "color": "#FFFFFF",
       "stroke_color": "#000000",
-      "stroke_width": 4,
-      "position_y_ratio": 0.80,
-      "bg_color": "rgba(0,0,0,0.3)",
-      "max_chars_per_line": 18,
+      "stroke_width": 6,
+      "position_y_ratio": 0.82,
+      "bg_color": "rgba(0,0,0,0.5)",
+      "max_chars_per_line": 12,
       "max_lines": 2,
       "word_by_word": false
     },
@@ -60,7 +60,7 @@
     },
     "progress_bar": {
       "enabled": true,
-      "height_px": 4,
+      "height_px": 6,
       "color": "#FF4444",
       "bg_color": "rgba(255,255,255,0.3)",
       "position": "bottom"
@@ -78,7 +78,7 @@
   "audio": {
     "bgm": {
       "enabled": true,
-      "volume_ratio": 0.15,
+      "volume_ratio": 0.45,
       "loop": true
     },
     "silence_speedup": {

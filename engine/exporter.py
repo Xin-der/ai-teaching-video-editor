@@ -33,29 +33,50 @@ from .scorer import SegmentScorer
 # 编码器探测
 # ------------------------------------------------------------------
 def _detect_encoder() -> tuple:
-    """检测可用的 H.264 编码器，优先 NVENC
+    """检测可用的 H.264 编码器，优先 NVENC（含实际编码测试）
 
     Returns:
         (encoder_name, encoder_params_dict)
     """
+    ffmpeg = os.environ.get("FFMPEG", "ffmpeg")
+
+    # 先用编码器列表检查 NVENC 是否存在
     try:
         result = subprocess.run(
-            ["ffmpeg", "-encoders"],
+            [ffmpeg, "-encoders"],
             capture_output=True, text=True, timeout=10
         )
-        if "h264_nvenc" in result.stdout:
-            return "h264_nvenc", {
-                "preset": "p4",
-                "cq": "23",
-                "rc": "vbr",
-            }
+        has_nvenc = "h264_nvenc" in result.stdout
     except Exception:
-        pass
+        has_nvenc = False
 
-    # 降级到 libx264
+    # 对 NVENC 做实际编码测试（部分 GPU 如 Blackwell 可能不兼容）
+    if has_nvenc:
+        try:
+            test_out = os.path.join(tempfile.gettempdir(), "_nvenc_test.mp4")
+            r = subprocess.run([
+                ffmpeg, "-y", "-f", "lavfi", "-i", "color=size=32x32:rate=1:duration=1",
+                "-c:v", "h264_nvenc", "-preset", "p4", "-b:v", "100k",
+                "-an", "-t", "1", test_out,
+            ], capture_output=True, text=True, timeout=15)
+            if r.returncode == 0:
+                try:
+                    os.remove(test_out)
+                except Exception:
+                    pass
+                return "h264_nvenc", {
+                    "preset": "p4",
+                    "cq": "23",
+                    "rc": "vbr",
+                }
+        except Exception:
+            pass
+
+    # 降级到 libx264（NVENC 不可用或不兼容）
+    # medium 预设比 fast 慢约 2x 但画质好很多；crf 21 导出质量接近源素材
     return "libx264", {
-        "preset": "fast",
-        "crf": "23",
+        "preset": "medium",
+        "crf": "21",
     }
 
 
@@ -154,7 +175,7 @@ class VideoExporter:
         """
         template = _load_template(platform)
 
-        seg_name = self._safe_filename(segment.get("topic", f"segment_{segment['id']}"))
+        seg_name = self._make_seg_dirname(segment)
         seg_dir = self.output_dir / seg_name
         seg_dir.mkdir(parents=True, exist_ok=True)
 
@@ -169,7 +190,7 @@ class VideoExporter:
 
         # 渲染
         self._render_ffmpeg(segment, source_video, template, output_path,
-                            asr_segments or [], seg_dir)
+                            asr_segments or [], seg_dir, platform)
 
         # 生成封面（小红书需要）
         cover_path = None
@@ -218,16 +239,12 @@ class VideoExporter:
 
     def _render_ffmpeg(self, segment: dict, source_video: str,
                        template: dict, output_path: str,
-                       asr_segments: list, seg_dir: Path):
-        """使用 ffmpeg CLI 渲染视频
-
-        步骤:
-          1. 生成 ASS 字幕文件（所有文字叠加层）
-          2. 构建视频滤镜链（裁切 + 缩放 + 进度条 + 字幕烧录）
-          3. 执行 ffmpeg 命令编码导出
-        """
+                       asr_segments: list, seg_dir: Path,
+                       platform: str = "douyin"):
+        """使用 ffmpeg CLI 渲染视频（含 BGM 混音 + 效果）"""
         video_cfg = template["video"]
         layout = template["layout"]
+        audio_cfg = template.get("audio", {})
         out_w, out_h = video_cfg["output_resolution"]
         fps = video_cfg["fps"]
         seg_start = segment["start"]
@@ -235,7 +252,7 @@ class VideoExporter:
         seg_duration = seg_end - seg_start
 
         # ---------- 1. 生成 ASS 字幕文件 ----------
-        ass_path = str(seg_dir / "subtitles.ass")
+        ass_path = str(seg_dir / f"subtitles_{platform}.ass")
         self._write_ass_file(
             segment, template, asr_segments, ass_path,
             out_w, out_h, seg_start, seg_duration
@@ -247,8 +264,13 @@ class VideoExporter:
             out_w, out_h, seg_duration
         )
 
-        # ---------- 3. 执行 ffmpeg ----------
-        # 视频编码参数
+        # ---------- 3. 音频处理 ----------
+        bgm_enabled = audio_cfg.get("bgm", {}).get("enabled", False)
+        bgm_volume = audio_cfg.get("bgm", {}).get("volume_ratio", 0.15)
+        orig_volume = audio_cfg.get("original_audio", {}).get("volume_ratio", 1.0)
+        bgm_file = self._find_bgm()
+
+        # ---------- 4. 编码参数 ----------
         if self._encoder == "h264_nvenc":
             vcodec_params = [
                 "-c:v", "h264_nvenc",
@@ -263,26 +285,58 @@ class VideoExporter:
                 "-crf", self._encoder_params["crf"],
             ]
 
-        # 构建完整命令行
         ffmpeg = os.environ.get("FFMPEG", "ffmpeg")
-        cmd = [
-            ffmpeg,
-            "-ss", str(seg_start),
-            "-t", str(seg_duration),
-            "-i", source_video,
-            "-vf", ",".join(filter_parts),
-            "-r", str(fps),
-            *vcodec_params,
-            "-b:v", video_cfg.get("bitrate", "8M"),
-            "-c:a", video_cfg.get("audio_codec", "aac"),
-            "-b:a", video_cfg.get("audio_bitrate", "256k"),
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            "-y",
-            output_path,
-        ]
 
-        # 打印命令（方便调试）
+        # ---------- 5. 构建命令 ----------
+        if bgm_enabled and bgm_file and os.path.exists(bgm_file):
+            # 使用 filter_complex 进行音频混合
+            video_filter_str = ",".join(filter_parts)
+            bgm_dur = self._probe_duration(bgm_file)
+            loop_count = max(1, int(seg_duration / max(bgm_dur, 1)) + 1)
+
+            filter_complex = (
+                f"[0:v]{video_filter_str}[v];"
+                f"[0:a]volume={orig_volume}[a0];"
+                f"[1:a]volume={bgm_volume},"
+                f"afade=t=in:d=2,"
+                f"afade=t=out:st={seg_duration-2}:d=2[bgm];"
+                f"[a0][bgm]amix=inputs=2:duration=first:dropout_transition=2[a]"
+            )
+
+            cmd = [
+                ffmpeg,
+                "-ss", str(seg_start), "-t", str(seg_duration),
+                "-i", source_video,
+                "-stream_loop", str(loop_count), "-i", bgm_file,
+                "-filter_complex", filter_complex,
+                "-map", "[v]", "-map", "[a]",
+                "-r", str(fps),
+                *vcodec_params,
+                "-b:v", video_cfg.get("bitrate", "8M"),
+                "-c:a", video_cfg.get("audio_codec", "aac"),
+                "-b:a", video_cfg.get("audio_bitrate", "256k"),
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                "-y", output_path,
+            ]
+        else:
+            # 无 BGM：简单模式
+            cmd = [
+                ffmpeg,
+                "-ss", str(seg_start), "-t", str(seg_duration),
+                "-i", source_video,
+                "-vf", ",".join(filter_parts),
+                "-r", str(fps),
+                *vcodec_params,
+                "-b:v", video_cfg.get("bitrate", "8M"),
+                "-filter:a", f"volume={orig_volume}",
+                "-c:a", video_cfg.get("audio_codec", "aac"),
+                "-b:a", video_cfg.get("audio_bitrate", "256k"),
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                "-y", output_path,
+            ]
+
         print(f"  ffmpeg cmd: {' '.join(cmd)[:200]}...")
 
         try:
@@ -290,10 +344,9 @@ class VideoExporter:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=600,  # 10 分钟超时
+                timeout=600,
             )
             if result.returncode != 0:
-                # 打印 ffmpeg 错误信息
                 stderr_tail = result.stderr.strip().split("\n")[-10:]
                 print(f"  ⚠ ffmpeg 错误:\n" + "\n".join(stderr_tail))
                 raise RuntimeError(f"ffmpeg 导出失败 (code={result.returncode})")
@@ -304,6 +357,31 @@ class VideoExporter:
             raise RuntimeError("ffmpeg 导出超时（10分钟）")
         except FileNotFoundError:
             raise RuntimeError("找不到 ffmpeg，请确认已安装并加入 PATH")
+
+    def _find_bgm(self) -> Optional[str]:
+        """查找 BGM 文件"""
+        bgm_dirs = [
+            Path(__file__).parent.parent / "assets" / "bgm",
+        ]
+        for d in bgm_dirs:
+            if d.exists():
+                for ext in (".m4a", ".mp3", ".aac", ".wav", ".ogg"):
+                    for f in d.glob(f"*{ext}"):
+                        return str(f)
+        return None
+
+    def _probe_duration(self, audio_path: str) -> float:
+        """探测音频文件时长"""
+        try:
+            ffprobe = os.environ.get("FFPROBE", "ffprobe")
+            result = subprocess.run(
+                [ffprobe, "-v", "quiet", "-show_entries",
+                 "format=duration", "-of", "csv=p=0", audio_path],
+                capture_output=True, text=True, timeout=10
+            )
+            return float(result.stdout.strip())
+        except Exception:
+            return 60.0  # 默认 60 秒
 
     # ------------------------------------------------------------------
     # ASS 字幕文件生成
@@ -475,7 +553,7 @@ class VideoExporter:
             f"ScriptType: v4.00+\n"
             f"PlayResX: {out_w}\n"
             f"PlayResY: {out_h}\n"
-            f"WrapStyle: 2\n"
+            f"WrapStyle: 0\n"
             f"ScaledBorderAndShadow: yes\n"
             f"\n"
             f"[V4+ Styles]\n"
@@ -516,10 +594,14 @@ class VideoExporter:
         # 顶部居中偏上
         y_pos = int(out_h * 0.06)
 
+        # 滑入动画：从顶部外滑入 + 淡入
+        anim_start_y = -int(out_h * 0.08)
         return [
             f"Dialogue: 0,{self._sec_to_ass_time(0)},"
             f"{self._sec_to_ass_time(duration)},"
-            f"Title,,0,0,0,,{{\\pos({out_w//2},{y_pos})\\fad(300,0)}}{text}"
+            f"Title,,0,0,0,,{{\\pos({out_w//2},{anim_start_y})"
+            f"\\t(0,500,\\pos({out_w//2},{y_pos}))"
+            f"\\fad(200,0)}}{text}"
         ]
 
     def _ass_ending_card(self, template: dict, out_w: int, out_h: int,
@@ -548,8 +630,14 @@ class VideoExporter:
         pos_y_ratio = cfg.get("position_y_ratio", 0.80)
         pos_y = int(out_h * pos_y_ratio)
         max_chars = cfg.get("max_chars_per_line", 18)
+        max_lines = cfg.get("max_lines", 2)
+        font_size_ratio = cfg.get("font_size_ratio", 0.045)
+        font_size = int(out_h * font_size_ratio)
 
-        # 筛选时间范围内的 ASR 句
+        # 标题卡时长，字幕在其结束后才开始
+        title_dur = template["layout"].get("title_card", {}).get("duration_seconds", 0)
+        MAX_SUB_DURATION = 5.0  # 单句字幕最长显示时间
+
         seg_end = seg_start + segment["duration"]
         seg_asr = [
             s for s in asr_segments
@@ -560,33 +648,71 @@ class VideoExporter:
         if not seg_asr:
             transcript = segment.get("transcript", "")
             if transcript:
-                text = self._escape_ass_text(self._wrap_text(transcript, max_chars))
+                # 用安全的字符数换行（clip 是最后防线）
+                safe_chars = int(out_w / font_size * 0.85)
+                text = self._escape_ass_text(
+                    self._wrap_text(transcript, safe_chars)
+                )
+                text = self._truncate_lines(text, max_lines)
+                safe_m = int(out_w * 0.04)
                 return [
-                    f"Dialogue: 0,{self._sec_to_ass_time(0)},"
-                    f"{self._sec_to_ass_time(segment['duration'])},"
-                    f"Subtitle,,0,0,0,,{{\\pos({out_w//2},{pos_y})}}{text}"
+                    f"Dialogue: 0,{self._sec_to_ass_time(title_dur)},"
+                    f"{self._sec_to_ass_time(min(title_dur+MAX_SUB_DURATION, segment['duration']))},"
+                    f"Subtitle,,0,0,0,,"
+                    f"{{\\clip({safe_m},{int(out_h*0.60)},{out_w-safe_m},{out_h})"
+                    f"\\pos({out_w//2},{pos_y})"
+                    f"\\3c&H88000000\\bord12\\shad0}}{text}"
                 ]
             return []
 
+        # 字幕安全区：底部区域，左右留边距，硬裁剪防止溢出
+        margin_x = int(out_w * 0.04)
+        safe_left = margin_x
+        safe_right = out_w - margin_x
+        safe_top = int(out_h * 0.60)
+        safe_bottom = out_h
+
         events = []
         for s in seg_asr:
-            text = s.get("text", "")
-            if not text:
+            raw_text = s.get("text", "")
+            if not raw_text:
                 continue
 
-            t_start = max(s["start"] - seg_start, 0)
+            t_start = max(s["start"] - seg_start, title_dur)
             t_end = min(s["end"] - seg_start, segment["duration"])
             if t_end <= t_start:
                 continue
 
-            text = self._escape_ass_text(self._wrap_text(text, max_chars))
+            if t_end - t_start > MAX_SUB_DURATION:
+                t_end = t_start + MAX_SUB_DURATION
+
+            # 安全换行 + \clip 硬裁剪（双重保障）
+            safe_chars = int(out_w / font_size * 0.85)
+            text = self._escape_ass_text(
+                self._wrap_text(raw_text, safe_chars)
+            )
+            text = self._truncate_lines(text, max_lines)
             events.append(
                 f"Dialogue: 0,{self._sec_to_ass_time(t_start)},"
                 f"{self._sec_to_ass_time(t_end)},"
-                f"Subtitle,,0,0,0,,{{\\pos({out_w//2},{pos_y})}}{text}"
+                f"Subtitle,,0,0,0,,"
+                f"{{\\clip({safe_left},{safe_top},{safe_right},{safe_bottom})"
+                f"\\pos({out_w//2},{pos_y})"
+                f"\\3c&H88000000\\bord12\\shad0}}{text}"
             )
 
         return events
+
+    def _truncate_lines(self, text: str, max_lines: int) -> str:
+        """截断超出 max_lines 的行"""
+        if max_lines <= 0:
+            return text
+        lines = text.split("\\N")
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+            # 最后一行加省略号标记
+            lines[-1] = lines[-1].rstrip() + "…"
+        return "\\N".join(lines)
 
     def _ass_keyword_popups(self, segment: dict, asr_segments: list,
                             template: dict, out_w: int, out_h: int) -> list:
@@ -617,10 +743,13 @@ class VideoExporter:
             t_end = t_start + duration
 
             kw_text = self._escape_ass_text(triggered[0])
+            # 弹跳动画：从 150% 缩小到 100% + 淡入淡出
             events.append(
                 f"Dialogue: 0,{self._sec_to_ass_time(t_start)},"
                 f"{self._sec_to_ass_time(t_end)},"
-                f"Popup,,0,0,0,,{{\\pos({out_w//2},{pos_y})\\fad(150,300)}}{kw_text}"
+                f"Popup,,0,0,0,,{{\\pos({out_w//2},{pos_y})"
+                f"\\fscx150\\fscy150\\t(0,250,\\fscx100\\fscy100)"
+                f"\\fad(100,300)}}{kw_text}"
             )
 
         return events
@@ -651,7 +780,7 @@ class VideoExporter:
         return [
             f"Dialogue: 0,{self._sec_to_ass_time(1.0)},"
             f"{self._sec_to_ass_time(1.0 + show_dur)},"
-            f"KnowledgeCard,,0,0,0,,{{\\pos({x_pos + card_w//2},{margin_t})\\fad(300,0)}}{text}"
+            f"KnowledgeCard,,0,0,0,,{{\\pos({x_pos},{margin_t})\\fad(300,0)}}{text}"
         ]
 
     def _ass_key_points_overlay(self, segment: dict, template: dict,
@@ -682,7 +811,7 @@ class VideoExporter:
         return [
             f"Dialogue: 0,{self._sec_to_ass_time(0)},"
             f"{self._sec_to_ass_time(seg_duration)},"
-            f"KeyPoints,,0,0,0,,{{\\pos({x_pos + overlay_w//2},{margin_t})\\fad(300,0)}}{text}"
+            f"KeyPoints,,0,0,0,,{{\\pos({x_pos},{margin_t})\\fad(300,0)}}{text}"
         ]
 
     # ------------------------------------------------------------------
@@ -723,16 +852,18 @@ class VideoExporter:
         # 3. 缩放到输出分辨率
         filters.append(f"scale={out_w}:{out_h}:flags=lanczos")
 
-        # 4. 进度条
+        # 4. 画质增强（轻度调色）
+        filters.append("eq=contrast=1.08:brightness=0.02:saturation=1.05")
+
+        # 5. 进度条
         if layout.get("progress_bar", {}).get("enabled"):
             filters.append(self._filter_progress_bar(template, out_w, out_h))
 
-        # 5. ASS 字幕烧录
-        # 注意：Windows 路径中的反斜杠需转成正斜杠，冒号需转义
+        # 6. ASS 字幕烧录
         ass_path_escaped = ass_path.replace("\\", "/").replace(":", "\\:")
         filters.append(f"ass='{ass_path_escaped}'")
 
-        # 6. 格式转换（确保兼容性）
+        # 7. 格式转换
         filters.append("format=yuv420p")
 
         return filters
@@ -755,30 +886,22 @@ class VideoExporter:
         return 0, 0
 
     def _filter_progress_bar(self, template: dict, out_w: int, out_h: int) -> str:
-        """生成进度条滤镜
-
-        使用 drawbox + 动态 crop 模拟进度动画。
-        简化版：绘制固定全宽进度条（后续可做动画优化）。
-        """
+        """生成进度条"""
         cfg = template["layout"]["progress_bar"]
-        bar_h = cfg.get("height_px", 4)
+        bar_h = cfg.get("height_px", 6)
         color = cfg.get("color", "#FF4444").lstrip("#")
-        pos = cfg.get("position", "bottom")
 
-        # ASS 颜色 → 滤镜格式
         if len(color) == 6:
             r, g, b = int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
         else:
             r, g, b = 255, 68, 68
 
-        y_pos = out_h - bar_h - 2 if pos == "bottom" else 2
+        y_bar = out_h - bar_h - 2
 
-        # 半透明背景条 + 着色前景条
-        # drawbox=x:y:w:h:color:thickness  # thickness=fill 表示实心
         return (
             f"drawbox=0:{out_h - bar_h - 2}:{out_w}:{bar_h + 2}:"
             f"black@0.3:t=fill,"
-            f"drawbox=0:{y_pos}:{out_w}:{bar_h}:"
+            f"drawbox=0:{y_bar}:{out_w}:{bar_h}:"
             f"0x{r:02X}{g:02X}{b:02X}@0.8:t=fill"
         )
 
@@ -973,20 +1096,67 @@ class VideoExporter:
         safe = safe.strip().replace(" ", "_") or "segment"
         return safe
 
-    def _wrap_text(self, text: str, max_chars: int) -> str:
-        """文本自动换行（ASS 用 \\N）"""
-        if len(text) <= max_chars:
-            return text
+    def _make_seg_dirname(self, segment: dict) -> str:
+        """为片段生成唯一目录名，格式: {编号}_{话题}
+        确保同名话题的多个片段不会互相覆盖。
+        """
+        seg_id = segment.get("id", 0)
+        topic = segment.get("topic", "segment")
+        safe_topic = self._safe_filename(topic)
+        return f"{seg_id:02d}_{safe_topic}"
+
+    def _wrap_text(self, text: str, max_chars: int,
+                   out_w: int = 0, font_size: int = 0) -> str:
+        """文本自动换行（ASS 用 \\N）
+
+        支持两种模式：
+        1. 纯字符数模式（out_w=0 时）：按 max_chars 字符换行
+        2. 像素宽度模式（out_w>0 时）：按实际渲染像素宽度换行
+           - CJK 字符宽度 ≈ font_size × 1.0
+           - ASCII/Latin 字符宽度 ≈ font_size × 0.55
+        """
+        if out_w <= 0 or font_size <= 0:
+            # 降级：纯字符数模式
+            if len(text) <= max_chars:
+                return text
+            lines = []
+            current = ""
+            for char in text:
+                current += char
+                if len(current) >= max_chars:
+                    lines.append(current)
+                    current = ""
+            if current:
+                lines.append(current)
+            return "\\N".join(lines)
+
+        # 像素宽度模式
+        max_width = int(out_w * 0.88)  # 留 12% 边距
         lines = []
         current = ""
+        current_width = 0
+
         for char in text:
-            current += char
-            if len(current) >= max_chars:
+            # 估算每个字符的像素宽度
+            if ord(char) > 0x2000:  # CJK 及全角字符
+                char_w = font_size
+            elif char in (' ', '\t'):
+                char_w = font_size * 0.3
+            else:  # ASCII/数字/半角标点
+                char_w = int(font_size * 0.55)
+
+            if current_width + char_w > max_width and current:
                 lines.append(current)
-                current = ""
+                current = char
+                current_width = char_w
+            else:
+                current += char
+                current_width += char_w
+
         if current:
             lines.append(current)
-        return "\\N".join(lines)
+
+        return "\\N".join(lines) if lines else text
 
 
 # ------------------------------------------------------------------

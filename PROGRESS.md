@@ -1,100 +1,84 @@
 # 项目进度
 
-> 最后更新: 2026-07-28 | 方向: 多平台智能切片工具
+> 最后更新: 2026-08-01 | 状态: v3 内容优化工具开发完成并验证通过
 
 ---
 
-## 方向变更记录
+## 版本演进
 
-### v1（已废弃）: AI 全自动出片
+### v3（当前）: 驾校内容优化工具
+目标：教练的素材视频/文字 → AI 生成 5 块《内容优化方案》（诊断/脚本改写/包装/转化话术/下期选题）→ 帮已有内容获客转化（同城）。
+**当前状态**: 开发完成，单元测试 10/10，真实 API（文字+视频）验证通过。
 
-目标：AI 学一次剪辑风格，以后自动渲染完整 mp4。
+**已完成** (2026-08-01):
+- 方向决策：与真实教练/老板对话确认——真痛点是"视频没人看+找不到学员"，非"缺内容"。产品定位从切片转向内容优化（详见 HANDOFF.md 第五/二章）
+- `engine/advisor.py`：内容顾问编排（视频/文字 → ASR/VLM → LLM → 5 块方案 + markdown）
+- `engine/analyzer.py`：新增 `generate_optimization_plan()`
+- `engine/pipeline.py`：新增公开 `extract_transcript()/extract_visuals()`
+- `web/`：新增 `/api/optimize` 接口 + `optimize.html` 前端（上传/粘贴 → 生成 → 一键复制）
+- `run.py`：新增 `--optimize/--city/--text`
+- `tests/test_advisor.py`：10 个单元测试（TDD）
+- 集成验收：CLI 文字/视频模式 + Web 全流程真实调用均通过
 
-**为什么废弃**：
-- 试图让 AI 模拟剪辑师审美（路线图叠加、红点跟随、关键帧动画），技术难度过高
-- 全流程硬编码参考视频路径，第二段出片完全不读新视频
-- 10 小时渲染跑不出正确结果，体验不可接受
-- 用户实际需求是多平台发布，不是全自动出片
+### v2（已废弃）: 多平台智能切片工具
+目标：AI 学一次剪辑风格，自动渲染完整 mp4。
+**废弃原因**: 模拟剪辑审美技术难度过高、流程硬编码严重、10小时渲染仍不正确。
 
 ### v2（当前）: 多平台智能切片工具
+目标：长教学视频 → AI 理解 → 智能切片 → 抖音/B站/小红书 + 文案。
+**当前状态**: 技术验证完成，效果不达预期，正在重新定位。
 
-目标：长教学视频 → AI 理解内容 → 智能切片 → 一键导出抖音/B站/小红书 + 文案。
+**已完成** (2026-07-28 ~ 08-01):
 
-**核心转变**：
-- AI 做擅长的事（理解教学内容），不做不擅长的（模仿剪辑审美）
-- 从"一条完整 mp4"改为"N 个片段 × 3 个平台"
-- 用户预览确认分段，不追求全自动
+| 日期 | 工作内容 |
+|------|---------|
+| 07-28 | 方向调整：全自动出片→多平台切片，核心引擎搭建完成 |
+| 07-29 | 导出链路验证完成（ffmpeg CLI + ASS字幕替代MoviePy） |
+| 07-29 | ASR阻塞解除（Windows AppLocker→torchaudio可用） |
+| 07-29 | 管线全流程跑通（9片段→18视频） |
+| 07-29 | 字幕溢出修复（多轮迭代，最终方案: `\clip`硬裁剪+`\3c`背景） |
+| 07-29 | 文件清理（释放约457MB） |
+| 07-29 | ASR参数优化（RMS 0.01→0.003, chunk重叠5s, 后处理修复） |
+| 07-29 | LLM内容分析器（`analyzer.py`, 知识点提取+文案生成+风格学习） |
+| 07-29 | BGM混音实现（ffmpeg filter_complex amix） |
+| 07-29 | Web预览界面（Flask + 暗色主题前端） |
+| 07-29 | 风格管理器（`style_manager.py`, 自定义模板CRUD） |
+| 07-29 | VLM调用优化（19帧→≤6帧采样） |
+| 08-01 | 市场调研 + 产品方向讨论（方向A/B/C） |
 
-详见 `docs/新方案_多平台切片工具.md`
+**已知限制**:
+- ASR质量受源视频音频质量限制（车内噪音+考试播报叠加）
+- NVENC在RTX 5060 (Blackwell) 不可用，使用libx264软件编码
+- BGM为ffmpeg合成，无法替代真实音乐库
+- 整体视频效果远不如商业产品（剪映/CapCut）
 
----
-
-## 当前代码状态
-
-```
-保留:
-  scripts/run_asr.py           FunASR ASR 引擎（可复用）
-  scripts/run_scenes.py        PySceneDetect 场景检测（可复用）
-  docs/AI视频剪辑方案调研.md    原始调研
-
-已删除（旧方案相关）:
-  scripts/describe_frames.py   VLM 描述（硬编码参考视频）
-  scripts/merge_content_map.py  合并 ASR+VLM（旧结构）
-  scripts/translate_style.py    LLM 风格翻译（旧方案专用）
-  scripts/match_style.py       标签匹配引擎（旧方案专用）
-  scripts/render.py            渲染（fallback 到参考视频）
-  scripts/process_video.py     处理新视频（路径全硬编码）
-  scripts/extract_segments.py  工程文件分段（依赖 draft_content）
-  scripts/parse_draft_deep.py  工程文件解析
-  style_labels.json / skill_style.md  旧风格规则
-
-可复用的知识资产:
-  work/asr_result.json         参考视频 ASR 结果（272 句）
-  work/frame_descriptions.json VLM 描述（17 段）
-  work/content_map.json        ASR+VLM 合并结果
-  ref/materials/               路线图素材（6 张）
-  .env                         API Key 配置
-```
+**下一步**: v3 之后——真实教练试用 1-2 家验证闭环、修 ASR 抗噪、前端升级 SPA。
 
 ---
 
-## 当前进度（v2 多平台智能切片工具）
-
-### ✅ 已完成 (2026-07-28)
+## 项目文件清单
 
 ```
-新增:
-├── engine/
-│   ├── __init__.py          ✅ 模块入口
-│   ├── pipeline.py          ✅ 核心管线（音频→ASR→场景→VLM→分段→评分）
-│   ├── scorer.py            ✅ 片段评分引擎（5维度确定性打分）
-│   └── exporter.py          ✅ 多平台导出器（MoviePy模板渲染）
-├── templates/
-│   ├── douyin.json          ✅ 抖音模板（9:16竖屏+大字幕+关键词弹窗+进度条）
-│   ├── bilibili.json        ✅ B站模板（16:9+知识卡片+章节）
-│   └── xiaohongshu.json     ✅ 小红书模板（1:1+要点覆盖+封面）
-├── knowledge/
-│   └── driving_exam.json    ✅ 驾考知识库（扣分点+高频错误+重点话题）
-└── run.py                   ✅ 重写为简洁CLI入口
+保留（核心代码）:
+├── engine/           ← 核心引擎（pipeline/scorer/exporter/analyzer/style_manager）
+├── templates/        ← 平台模板 + custom/自定义目录
+├── knowledge/        ← 驾考知识库
+├── web/              ← Flask Web预览界面
+├── run.py            ← CLI入口
+├── tests/            ← 测试文件
+├── assets/bgm/       ← BGM资源
+├── HANDOFF.md        ← 交接文档
+├── PROGRESS.md       ← 本文件
+├── README.md         ← 项目说明
+└── .env              ← API Key配置
+
+可清理（非必要）:
+├── scripts/          ← 旧独立脚本（已被engine/替代，可删除）
+└── docs/             ← 旧调研文档（可归档）
+
+.gitignore 已忽略:
+├── work/             ← 中间产物（音频/ASR/VLM缓存/分段结果）
+├── output/           ← 导出视频
+├── input/            ← 源视频
+└── .env              ← API密钥
 ```
-
-### 📋 待确认事项（已确认）
-
-1. **界面形式**: 先 CLI，再加 Web 预览界面
-2. **知识库**: 先用预填的 15 个话题 + 扣分点，跑起来再细调
-3. **教学类型**: 先只聚焦驾考
-
-### 🔜 下一步（在新机器上）
-
-1. **准备测试视频** — 已放入 `input/SGOI6715.MOV`（4K HEVC 4GB）
-2. **运行完整管线** — 建议先转 1080p 代理，参考 `HANDOFF_新机器交接.md`
-3. **验证导出** — 用 ffmpeg CLI 代替 MoviePy（MoviePy 在 4K 下太慢）
-4. **调优** — 根据实际效果调整评分权重、合并阈值、模板参数
-5. **Web 预览界面** — 用轻量框架（Flask/FastAPI）做本地预览
-6. **扩展** — 静音加速、BGM 叠加、关键词弹窗动画
-
-### ⚠️ 已知问题
-
-- **4K HEVC 性能瓶颈**: PySceneDetect 和 MoviePy 在 4K 源上超时，需用 1080p 代理
-- **MoviePy API 兼容**: `write_videofile` 的 `verbose`/`preset` 参数在 v2.2.1 不支持
-- **字体路径**: Pillow 需完整路径 `C:/Windows/Fonts/simhei.ttf`

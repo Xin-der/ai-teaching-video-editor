@@ -35,7 +35,7 @@
     },
     "subtitle": {
       "enabled": true,
-      "font_size_ratio": 0.035,
+      "font_size_ratio": 0.040,
       "font": "SimHei",
       "color": "#FFFFFF",
       "stroke_color": "#000000",
