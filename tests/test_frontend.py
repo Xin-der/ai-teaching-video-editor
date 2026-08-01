@@ -66,6 +66,13 @@ def test_optimize_api_empty_input_rejected():
     return True
 
 
+def test_css_has_design_tokens():
+    css = CSS_PATH.read_text(encoding="utf-8")
+    for token in ("--primary", "--bg", "--surface", "--text", "--border", "--success", "--error"):
+        assert token in css, f"缺少 token {token}"
+    return True
+
+
 def main():
     tests = [(name, fn) for name, fn in globals().items()
              if name.startswith("test_") and callable(fn)]
