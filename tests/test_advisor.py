@@ -22,6 +22,36 @@ def test_pipeline_public_methods():
     return True
 
 
+def test_plan_prompt_builder():
+    """方案 prompt 包含 5 块结构和城市注入"""
+    from engine.analyzer import ContentAnalyzer
+    a = ContentAnalyzer()
+    prompt = a._build_plan_prompt(
+        "教练说倒车入库一定要看点位",
+        {"topics": ["倒车入库"], "visuals": ["车内视角"]},
+        city="长沙",
+        platform="douyin",
+    )
+    for key in ("diagnosis", "script_rewrite", "packaging", "conversion", "next_topics"):
+        assert key in prompt, f"prompt 缺少 {key}"
+    assert "长沙" in prompt, "prompt 未注入城市"
+    assert "倒车入库" in prompt, "prompt 未注入 transcript"
+    return True
+
+
+def test_plan_validation():
+    """_validate_plan 补全 5 块结构、保留已有字段"""
+    from engine.analyzer import ContentAnalyzer
+    a = ContentAnalyzer()
+    plan = a._validate_plan({"diagnosis": {"summary": "诊断内容"}})
+    for key in ("diagnosis", "script_rewrite", "packaging", "conversion", "next_topics"):
+        assert key in plan, f"缺少 {key}"
+    assert plan["diagnosis"]["summary"] == "诊断内容", "已有字段被覆盖"
+    assert plan["diagnosis"]["issues"] == [], "缺失字段未补默认"
+    assert isinstance(plan["next_topics"], list), "next_topics 应为列表"
+    return True
+
+
 def main():
     tests = [(name, fn) for name, fn in globals().items()
              if name.startswith("test_") and callable(fn)]
