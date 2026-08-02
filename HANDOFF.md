@@ -1,6 +1,6 @@
 # 项目交接文档
 
-> 最后更新: 2026-08-01 | 状态: v3 内容优化工具开发完成并验证通过
+> 最后更新: 2026-08-02 | 状态: v3.1 前端浅色商务风重构完成（v3 内容优化工具 + v3.1 前端）
 
 ---
 
@@ -10,11 +10,13 @@
 
 **核心目标**: 教练的素材视频/文字 → AI 生成 5 块《内容优化方案》（诊断 / 脚本改写 / 包装 / 转化话术 / 下期选题）→ 照着改、照着发，帮驾校同城获客
 
-**当前阶段**: v3 开发完成，单元测试 10/10 通过，真实 API（文字/视频两种输入）验证通过
+**当前阶段**: v3.1（2026-08-02）前端浅色商务风重构完成。单元测试 10/10 + 前端回归 8/8，真实 API（文字/视频）+ 真实 HTTP/LLM 前端调用验证通过。
 
 ---
 
 ## 二、v3 新增（内容优化工具）
+
+**v3.1 前端重构（2026-08-02）**: 前端从暗色单页工具重构为**浅色商务风单页 MVP 产品站**（Hero 价值主张 → 三步怎么用 → 核心工具 → 历史方案 → 五块说明 → Footer），面向驾校老板/运营（非技术人群），简约大气、讲究留白。样式拆至 `web/static/css/style.css`（设计 token + 组件 + 响应式 + 无障碍），逻辑拆至 `web/static/js/app.js`（真实调 `/api/optimize` + `/api/optimize/status`）；新增本地历史方案（localStorage 上限 20，可回看/复制/删除）。`web/app.py` 零改动。设计文档/实施计划见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`。框架决策：暂不上 SPA（单页纯静态足够；产品放大/多用户时再上 Vue/React）。
 
 **核心链路**: 上传视频（或粘贴文字，可选填城市）→ ASR 转录 + 可选 VLM 看帧 → LLM 生成 5 块《内容优化方案》→ Web 页展示 + markdown 文件，每块可一键复制。
 
@@ -68,9 +70,12 @@ ai-teaching-video-editor/
 │   └── driving_exam.json          ← 驾考知识库（12个话题+扣分点+关键词+文案模板）
 ├── assets/
 │   └── bgm/default_bgm.m4a        ← 默认BGM（C大调和弦进行，16s循环）
-├── web/                           ← Web 预览界面（Flask）
-│   ├── app.py                     ← API服务（片段/导出/文案/缩略图/视频预览）
-│   └── templates/index.html       ← 前端界面（暗色主题，响应式）
+├── web/                           ← Web 产品站（Flask）
+│   ├── app.py                     ← API服务（optimize/status/静态托管/旧导出接口）
+│   ├── templates/optimize.html    ← 页面骨架（Hero/三步/工具/历史/五块说明/Footer）
+│   └── static/
+│       ├── css/style.css          ← 设计系统（浅色商务风 token + 组件 + 响应式）
+│       └── js/app.js              ← 交互逻辑（生成/轮询/渲染/复制/历史）
 ├── run.py                         ← CLI 入口
 ├── RUN.bat / RUN_WEB.bat          ← Windows 一键启动
 ├── tests/test_export.py           ← 导出测试
@@ -176,16 +181,16 @@ ai-teaching-video-editor/
 - [x] **决定产品方向**（A/B/C 三选一）→ 已定：内容优化工具（A 的内容诊断 + 获客转化，经真实用户验证）
 - [x] 根据方向裁剪/重构代码 → v3 完成并验证
 
-### 短期（v3 之后）
+### 短期（v3.1 之后）
+- [x] Web 界面浅色商务风重构 → v3.1 完成（静态 HTML/CSS/JS 零构建；框架决策见"中期"）
 - [ ] ASR 质量：车内噪音识别仍待优化（换 SenseVoice 或云端 ASR）
-- [ ] Web 界面升级为 Vue/React SPA（当前为单页 JS）
 - [ ] 接入真实教练试用 1-2 家，验证"视频→方案→发布→留资"闭环
 - [ ] 反馈循环：记录每条视频的诊断→建议→实际播放/留资数据
 
 ### 短期
 - [ ] 解决ASR质量问题（尝试SenseVoice/faster-whisper 或云端ASR API）
 - [ ] 替换BGM为真实音乐（下载免版税BGM资源）
-- [ ] Web界面升级（Vue/React SPA 替代当前Jinja2模板）
+- [ ] Web界面升级为 Vue/React SPA（当前纯静态足够；等产品放大/多用户/复杂状态时再上框架）
 
 ### 中期
 - [ ] LLM评分替代规则评分（analyzer.py已有 `score_segment()`，但pipeline未调用）
@@ -224,6 +229,7 @@ py -3.12 run.py input/PNIK4383.MOV --export
 
 # 单元测试
 py -3.12 tests/test_advisor.py   # 10/10
+py -3.12 tests/test_frontend.py  # 8/8
 ```
 
 ---
@@ -232,6 +238,6 @@ py -3.12 tests/test_advisor.py   # 10/10
 
 ```
 请先阅读 HANDOFF.md 和 PROGRESS.md 了解项目状态。
-方向已定：驾校内容优化工具（v3 已开发完成并验证通过，详见第二章）。
-下一步：真实教练试用 1-2 家验证"视频→方案→发布→留资"闭环、修 ASR 抗噪、Web 前端升级 SPA（见第七章短期待办）。
+方向已定：驾校内容优化工具（v3 内容优化 + v3.1 前端浅色商务风重构已完成，详见第二章/第四章）。
+下一步：真实教练试用 1-2 家验证"视频→方案→发布→留资"闭环、修 ASR 抗噪（见第七章短期待办）。
 ```

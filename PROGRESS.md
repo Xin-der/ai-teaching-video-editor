@@ -1,6 +1,6 @@
 # 项目进度
 
-> 最后更新: 2026-08-01 | 状态: v3 内容优化工具开发完成并验证通过
+> 最后更新: 2026-08-02 | 状态: v3.1 前端浅色商务风重构完成
 
 ---
 
@@ -20,10 +20,14 @@
 - `tests/test_advisor.py`：10 个单元测试（TDD）
 - 集成验收：CLI 文字/视频模式 + Web 全流程真实调用均通过
 
-### v3.1 前端重构（浅色商务风 MVP 产品站）
-- 2026-08-01 前端从暗色单页工具重构为浅色商务风单页产品站（Hero/三步/工具/五块说明/Footer）
-- 样式与逻辑拆分至 `web/static/css/style.css` + `web/static/js/app.js`，`web/app.py` 零改动
-- 新增本地历史方案（localStorage，最多 20 条）
+### v3.1（当前）: 前端浅色商务风重构（MVP 产品站）
+目标：把暗色单页工具重构成驾校老板信任的浅色商务风单页产品站，功能与后端不变。
+**当前状态**: 完成（2026-08-02），前端回归 8/8，后端 10/10，真实 HTTP + LLM 验证通过。
+- 页面结构：Hero（价值主张）/ 三步怎么用 / 核心工具 / 历史方案 / 五块说明 / Footer
+- 样式拆至 `web/static/css/style.css`（设计 token + 组件 + 响应式 + 无障碍），逻辑拆至 `web/static/js/app.js`（真实调 `/api/optimize` + `/api/optimize/status`），`web/app.py` 零改动
+- 新增本地历史方案（localStorage，上限 20 条，可回看/复制/删除）
+- 设计文档 `docs/superpowers/specs/2026-08-01-frontend-redesign-design.md`、实施计划 `docs/superpowers/plans/2026-08-01-frontend-redesign.md`
+- 过程：subagent 驱动 5 任务实施 + 每任务审查 + 整分支审查 + 健壮性修复（clipboard/历史校验/轮询恢复/触控目标 44px）
 - `tests/test_frontend.py` 8 项回归通过；`tests/test_advisor.py` 仍 10/10
 
 ### v2（已废弃）: 多平台智能切片工具
@@ -58,7 +62,7 @@
 - BGM为ffmpeg合成，无法替代真实音乐库
 - 整体视频效果远不如商业产品（剪映/CapCut）
 
-**下一步**: v3 之后——真实教练试用 1-2 家验证闭环、修 ASR 抗噪、前端升级 SPA。
+**下一步**: v3.1 之后——真实教练试用 1-2 家验证"视频→方案→发布→留资"闭环、修 ASR 抗噪。前端暂不上 SPA 框架（单页纯静态足够；等产品放大/多用户再上 Vue/React）。
 
 ---
 
@@ -69,10 +73,11 @@
 ├── engine/           ← 核心引擎（pipeline/scorer/exporter/analyzer/style_manager）
 ├── templates/        ← 平台模板 + custom/自定义目录
 ├── knowledge/        ← 驾考知识库
-├── web/              ← Flask Web预览界面
+├── web/              ← Flask 产品站（templates/optimize.html + static/css + static/js）
 ├── run.py            ← CLI入口
 ├── tests/            ← 测试文件
 ├── assets/bgm/       ← BGM资源
+├── docs/superpowers/ ← 设计文档(specs/)与实施计划(plans/)
 ├── HANDOFF.md        ← 交接文档
 ├── PROGRESS.md       ← 本文件
 ├── README.md         ← 项目说明
