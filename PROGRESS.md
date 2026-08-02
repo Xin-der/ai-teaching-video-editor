@@ -1,6 +1,6 @@
 # 项目进度
 
-> 最后更新: 2026-08-02 | 状态: v3.1 前端浅色商务风重构完成
+> 最后更新: 2026-08-02 | 状态: v3.2 ASR 抗噪升级完成
 
 ---
 
@@ -20,7 +20,18 @@
 - `tests/test_advisor.py`：10 个单元测试（TDD）
 - 集成验收：CLI 文字/视频模式 + Web 全流程真实调用均通过
 
-### v3.1（当前）: 前端浅色商务风重构（MVP 产品站）
+### v3.2（当前）: ASR 抗噪升级（SenseVoice）
+目标：把 ASR 从 paraformer（seaco 增强版）换成 SenseVoice-Small + fsmn-vad + 驾考热词，解决车内噪音+考试播报导致的碎片化转录。
+**当前状态**: 完成（2026-08-02），单测 ASR 10/10 + 顾问 10/10 + 前端 8/8，真实转录 + 完整 optimize 流程端到端验证通过。
+- 新增 `engine/asr.py`：`load_hotwords()`（从知识库生成驾考热词表）+ `SenseVoiceASR`（进程级模型单例，`transcribe()` 返回秒级 `[{start,end,text}]`）
+- `pipeline._run_asr()` 改调用 `SenseVoiceASR`；删除 60s chunk 循环 + `_parse_asr_timestamps` + `numpy` 死导入；精简 `_postprocess_asr`
+- 输出 schema 不变，analyzer/advisor/Web 下游零改动；无 paraformer 回退、无云端抽象
+- 真实样本验证：343s 车内噪音音频 CPU 推理 9s（~38× 实时）；转录从"碎片化不可读"提升到"成句可读、考试播报干净"（"考试结束，成绩合格，请把车开回起点"）；完整 optimize 出的 5 块方案质量显著提升（LLM 正确提炼出"雨刮器找点法"）
+- 新增依赖：`pypinyin`（funasr postprocess_hotwords 需要）
+- 设计文档 `docs/superpowers/specs/2026-08-02-asr-sensevoice-upgrade-design.md`
+- 残余：教练快速/密集说话仍会碎、个别同音字错误（可接受，后续可评估云端 ASR 升级）
+
+### v3.1: 前端浅色商务风重构（MVP 产品站）
 目标：把暗色单页工具重构成驾校老板信任的浅色商务风单页产品站，功能与后端不变。
 **当前状态**: 完成（2026-08-02），前端回归 8/8，后端 10/10，真实 HTTP + LLM 验证通过。
 - 页面结构：Hero（价值主张）/ 三步怎么用 / 核心工具 / 历史方案 / 五块说明 / Footer
@@ -62,7 +73,7 @@
 - BGM为ffmpeg合成，无法替代真实音乐库
 - 整体视频效果远不如商业产品（剪映/CapCut）
 
-**下一步**: v3.1 之后——真实教练试用 1-2 家验证"视频→方案→发布→留资"闭环、修 ASR 抗噪。前端暂不上 SPA 框架（单页纯静态足够；等产品放大/多用户再上 Vue/React）。
+**下一步**: 真实教练试用 1-2 家验证"视频→方案→发布→留资"闭环（ASR 抗噪已在 v3.2 修复）。前端暂不上 SPA 框架（单页纯静态足够；等产品放大/多用户再上 Vue/React）。
 
 ---
 

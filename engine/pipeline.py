@@ -25,7 +25,6 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
 
-import numpy as np
 from dotenv import load_dotenv
 
 # 在导入其他模块前加载 .env
@@ -246,7 +245,7 @@ class Pipeline:
     # ------------------------------------------------------------------
 
     def _run_asr(self):
-        """FunASR Paraformer 中文语音识别"""
+        """SenseVoice 抗噪语音识别（engine.asr.SenseVoiceASR）"""
         print(f"\n[Step 3] ASR 语音识别...")
 
         if self.asr_result_path.exists():
@@ -254,162 +253,59 @@ class Pipeline:
             self._load_asr()
             return
 
-        print("  加载 FunASR 模型 (paraformer-zh)...")
-        from funasr import AutoModel
-        import soundfile as sf
+        from engine.asr import SenseVoiceASR
+        asr = SenseVoiceASR()
+        self.asr_segments = asr.transcribe(str(self.audio_path))
 
-        model = AutoModel(model="paraformer-zh", model_revision="v2.0.4")
+        # 轻量后处理
+        self.asr_segments = self._postprocess_asr(self.asr_segments)
 
-        print(f"  读取音频: {self.audio_path}")
-        audio_data, sr = sf.read(str(self.audio_path))
-        if len(audio_data.shape) > 1:
-            audio_data = audio_data.mean(axis=1)
-
-        duration = len(audio_data) / sr
-        print(f"  音频时长: {duration:.1f}s")
-
-        # 每 60 秒一段，5s 重叠避免边界切断
-        CHUNK_SEC = 60
-        OVERLAP_SEC = 5
-        chunk_samples = CHUNK_SEC * sr
-        overlap_samples = OVERLAP_SEC * sr
-        step_samples = chunk_samples - overlap_samples  # 实际步进 55s
-        total_chunks = max(1, (len(audio_data) - overlap_samples + step_samples - 1) // step_samples)
-
-        all_segments = []
-
-        for i in range(total_chunks):
-            start_idx = i * step_samples
-            end_idx = min(start_idx + chunk_samples, len(audio_data))
-            chunk = audio_data[start_idx:end_idx]
-            chunk_dur = len(chunk) / sr
-            time_offset = start_idx / sr
-
-            # 跳过静音段（降低阈值以捕获更多有效语音）
-            rms = np.sqrt(np.mean(chunk ** 2))
-            if rms < 0.003:
-                print(f"  [{i+1}/{total_chunks}] {time_offset:.0f}s-{time_offset+chunk_dur:.0f}s 静音跳过")
-                continue
-
-            print(f"  [{i+1}/{total_chunks}] {time_offset:.0f}s-{time_offset+chunk_dur:.0f}s ...", end=" ", flush=True)
-
-            temp_file = str(self.work_dir / f"_chunk_{i}.wav")
-            sf.write(temp_file, chunk.astype(np.float32), sr)
-
-            try:
-                result = model.generate(input=temp_file)
-                if result and len(result) > 0:
-                    r = result[0]
-                    text = r.get("text", "")
-                    timestamps = r.get("timestamp", [])
-
-                    if text and timestamps:
-                        words = text.split()
-                        seg_texts, seg_times = self._parse_asr_timestamps(words, timestamps)
-
-                        for seg_text, (st, et) in zip(seg_texts, seg_times):
-                            all_segments.append({
-                                "start": round(time_offset + st, 2),
-                                "end": round(time_offset + et, 2),
-                                "text": seg_text,
-                            })
-                        print(f"{len(seg_texts)} 句")
-                    else:
-                        print("空")
-                else:
-                    print("无结果")
-            except Exception as e:
-                print(f"失败: {e}")
-            finally:
-                if os.path.exists(temp_file):
-                    os.remove(temp_file)
-
-        # 后处理：排序、合并短句、去重
-        all_segments.sort(key=lambda s: s["start"])
-        all_segments = self._postprocess_asr(all_segments)
-
-        self.asr_segments = all_segments
         with open(self.asr_result_path, "w", encoding="utf-8") as f:
-            json.dump({"segments": all_segments, "total": len(all_segments)},
+            json.dump({"segments": self.asr_segments, "total": len(self.asr_segments)},
                       f, ensure_ascii=False, indent=2)
 
-        print(f"  ASR 完成! 共 {len(all_segments)} 句（后处理后）")
-
-    def _parse_asr_timestamps(self, words: list, timestamps: list) -> tuple:
-        """解析 ASR timestamp，按标点 + 长度切句"""
-        seg_texts = []
-        seg_times = []
-        buf = []
-        buf_start = None
-        buf_end = None
-        # 断句标点
-        break_chars = set("，,。！!？?；;：:")
-
-        for wi, ts in enumerate(timestamps):
-            if wi >= len(words):
-                break
-            w = words[wi]
-            ts_start = ts[0] / 1000.0
-            ts_end = ts[1] / 1000.0
-
-            if buf_start is None:
-                buf_start = ts_start
-            buf.append(w)
-            buf_end = ts_end
-
-            # 断句条件: 超过 20 字或遇到标点
-            if len(buf) >= 20 or w in break_chars:
-                seg_texts.append("".join(buf))
-                seg_times.append((buf_start, buf_end))
-                buf = []
-                buf_start = None
-
-        # 剩余
-        if buf:
-            seg_texts.append("".join(buf))
-            seg_times.append((buf_start, buf_end))
-
-        return seg_texts, seg_times
+        print(f"  ASR 完成! 共 {len(self.asr_segments)} 句（后处理后）")
 
     def _postprocess_asr(self, segments: list) -> list:
-        """ASR 后处理：轻量级清理（不去破坏原始句子边界）
+        """ASR 后处理：轻量清理（SenseVoice+VAD 已按语音段出句）
 
-        1. 过滤 < 0.15s 的孤立单词（如单独的"啊""嗯"）
-        2. 去重 chunk 重叠造成的完全重复相邻句
+        1. 过滤空文本 / 超短孤立词（< 0.3s 且 ≤2 字，如"啊""嗯"）
+        2. 合并时间重叠且文本高度相似的相邻句
         """
         if not segments:
             return segments
 
-        # 第 1 步：过滤太短的孤立词
+        # 第 1 步：过滤空文本与超短孤立词
         filtered = []
         for seg in segments:
-            dur = seg["end"] - seg["start"]
-            text = seg["text"].strip()
-            if dur < 0.15 and len(text) <= 2:
+            text = (seg.get("text") or "").strip()
+            if not text:
                 continue
-            filtered.append(seg)
+            dur = seg["end"] - seg["start"]
+            if dur < 0.3 and len(text) <= 2:
+                continue
+            filtered.append({**seg, "text": text})
 
-        # 第 2 步：去重 chunk 重叠造成的重复识别
+        # 第 2 步：合并时间重叠且文本高度相似的相邻句
         if len(filtered) <= 1:
             return filtered
 
-        deduped = [filtered[0]]
+        merged = [filtered[0]]
         for seg in filtered[1:]:
-            prev = deduped[-1]
-            # 只合并完全重叠且文本高度相似的（chunk overlap 造成）
-            time_overlap = seg["start"] <= prev["start"] + 0.5
+            prev = merged[-1]
+            time_overlap = seg["start"] <= prev["end"]
             text_similar = (
                 seg["text"] in prev["text"] or prev["text"] in seg["text"]
             )
             if time_overlap and text_similar:
                 # 保留更长文本、更宽时间范围
-                deduped[-1]["end"] = max(prev["end"], seg["end"])
+                merged[-1]["end"] = max(prev["end"], seg["end"])
                 if len(seg["text"]) > len(prev["text"]):
-                    deduped[-1]["text"] = seg["text"]
+                    merged[-1]["text"] = seg["text"]
                 continue
-            deduped.append(seg)
+            merged.append(seg)
 
-        return deduped
+        return merged
 
     def _load_asr(self):
         """加载缓存的 ASR 结果"""

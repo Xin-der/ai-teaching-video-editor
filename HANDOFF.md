@@ -1,6 +1,6 @@
 # 项目交接文档
 
-> 最后更新: 2026-08-02 | 状态: v3.1 前端浅色商务风重构完成（v3 内容优化工具 + v3.1 前端）
+> 最后更新: 2026-08-02 | 状态: v3.2 ASR 抗噪升级完成（SenseVoice + 驾考热词）
 
 ---
 
@@ -10,13 +10,15 @@
 
 **核心目标**: 教练的素材视频/文字 → AI 生成 5 块《内容优化方案》（诊断 / 脚本改写 / 包装 / 转化话术 / 下期选题）→ 照着改、照着发，帮驾校同城获客
 
-**当前阶段**: v3.1（2026-08-02）前端浅色商务风重构完成。单元测试 10/10 + 前端回归 8/8，真实 API（文字/视频）+ 真实 HTTP/LLM 前端调用验证通过。
+**当前阶段**: v3.2（2026-08-02）ASR 抗噪升级完成。SenseVoice-Small + fsmn-vad + 驾考热词替换 paraformer，车内噪音场景转录从"碎片化不可读"提升到"成句可读、考试播报干净"；单测 ASR 10/10 + 顾问 10/10 + 前端 8/8，CPU 推理 ~38× 实时，完整 optimize 流程端到端验证通过。
 
 ---
 
 ## 二、v3 新增（内容优化工具）
 
 **v3.1 前端重构（2026-08-02）**: 前端从暗色单页工具重构为**浅色商务风单页 MVP 产品站**（Hero 价值主张 → 三步怎么用 → 核心工具 → 历史方案 → 五块说明 → Footer），面向驾校老板/运营（非技术人群），简约大气、讲究留白。样式拆至 `web/static/css/style.css`（设计 token + 组件 + 响应式 + 无障碍），逻辑拆至 `web/static/js/app.js`（真实调 `/api/optimize` + `/api/optimize/status`）；新增本地历史方案（localStorage 上限 20，可回看/复制/删除）。`web/app.py` 零改动。设计文档/实施计划见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`。框架决策：暂不上 SPA（单页纯静态足够；产品放大/多用户时再上 Vue/React）。
+
+**v3.2 ASR 抗噪升级（2026-08-02）**: ASR 引擎从 paraformer（seaco 增强版）换为 **SenseVoice-Small + fsmn-vad + 驾考热词**。新增 `engine/asr.py`（`load_hotwords` + `SenseVoiceASR` 进程级模型单例），`pipeline._run_asr()` 改调用之；删除 60s chunk 循环 + 字级时间戳解析，精简 `_postprocess_asr`；输出 schema 不变，下游零改动。无回退、无云端抽象。真实样本验证：车内噪音+考试播报音频转录成句可读、播报干净（如"考试结束，成绩合格，请把车开回起点"），CPU 推理 ~38× 实时（343s 音频 9s），完整 `--optimize` 出的 5 块方案质量显著提升（LLM 正确提炼出"雨刮器找点法"）。设计文档 `docs/superpowers/specs/2026-08-02-asr-sensevoice-upgrade-design.md`。
 
 **核心链路**: 上传视频（或粘贴文字，可选填城市）→ ASR 转录 + 可选 VLM 看帧 → LLM 生成 5 块《内容优化方案》→ Web 页展示 + markdown 文件，每块可一键复制。
 
@@ -56,11 +58,12 @@
 ```
 ai-teaching-video-editor/
 ├── engine/                        ← 核心引擎
+│   ├── advisor.py                 ← 内容顾问（编排 + write_plan_markdown）
+│   ├── asr.py                     ← SenseVoice ASR（抗噪转录 + 驾考热词 + 模型单例）
 │   ├── pipeline.py                ← 7步管线（音频→ASR→场景→VLM→LLM→分段→评分）
-│   ├── scorer.py                  ← 5维度规则评分（30%关键词+25%知识库+20%时长+15%画面+10%重复）
-│   ├── exporter.py                ← ffmpeg CLI 导出（ASS字幕 + BGM混音 + 画质增强）
 │   ├── analyzer.py                ← LLM 内容分析器（qwen3.7-plus，知识点提取/文案生成/风格分析）
-│   └── style_manager.py           ← 风格管理器（自定义模板 CRUD + 风格学习）
+│   ├── scorer.py                  ← 5维度规则评分（旧流程遗留，新方向不调用）
+│   └── exporter.py                ← ffmpeg CLI 导出（旧流程遗留，新方向不调用）
 ├── templates/                     ← 平台模板
 │   ├── douyin.json                ← 9:16竖屏 | 字幕0.038h | 位置78% | BGM音量45%
 │   ├── bilibili.json              ← 16:9横屏 | 知识卡片 | 无BGM
@@ -85,7 +88,7 @@ ai-teaching-video-editor/
 ### 管线流程
 ```
 视频 → ffprobe探测 → ffmpeg音频提取(16kHz mono)
-  → FunASR Paraformer(32句/5.7min, RMS 0.003, chunk 60s+5s重叠)
+  → SenseVoice-Small + fsmn-vad(38句/5.7min, 带句子级时间戳, 驾考热词纠错)
   → PySceneDetect(19场景, ContentDetector threshold=30)
   → VLM qwen3.7-plus关键帧描述(≤6帧采样, topic/location/activity)
   → LLM qwen3.7-plus文本分析(知识点提取, 4个知识点/5.7min)
@@ -98,7 +101,7 @@ ai-teaching-video-editor/
 
 | 参数 | 值 |
 |------|-----|
-| ASR模型 | FunASR Paraformer v2.0.4 |
+| ASR模型 | FunASR SenseVoice-Small + fsmn-vad（抗噪，CPU ~38× 实时，驾考热词） |
 | VLM/LLM模型 | qwen3.7-plus (DashScope OpenAI兼容) |
 | API端点 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
 | 编码器 | libx264 (NVENC在RTX 5060不可用，已自动降级) |
@@ -131,7 +134,7 @@ ai-teaching-video-editor/
 7. VLM调用优化 — 19帧→≤6帧采样，减少API成本
 
 ### 已修复但效果仍不理想的
-- **ASR质量**: 车内噪音+考试播报叠加，FunASR识别碎片化严重（"休息休息试准准请问试没问题题是考试"）
+- **ASR质量（v3.2 已大幅改善）**: 换 SenseVoice-Small + fsmn-vad 后，车内噪音+考试播报场景转录成句可读、播报干净（旧 paraformer："休息休息试准准请问试没问题题是考试" → 新："考试结束，成绩合格，请把车开回起点"）。**残余**：教练快速/密集说话仍会碎、个别同音字错误
 - **字幕效果**: 虽有 `\clip` 防止溢出，但整体视觉效果仍远不如剪映/CapCut
 - **BGM**: ffmpeg生成的sine波和弦，无法与真实音乐库相比
 
@@ -183,12 +186,12 @@ ai-teaching-video-editor/
 
 ### 短期（v3.1 之后）
 - [x] Web 界面浅色商务风重构 → v3.1 完成（静态 HTML/CSS/JS 零构建；框架决策见"中期"）
-- [ ] ASR 质量：车内噪音识别仍待优化（换 SenseVoice 或云端 ASR）
+- [x] ASR 质量：SenseVoice-Small + fsmn-vad + 驾考热词 替换完成 → v3.2（残余：快速说话仍会碎）
 - [ ] 接入真实教练试用 1-2 家，验证"视频→方案→发布→留资"闭环
 - [ ] 反馈循环：记录每条视频的诊断→建议→实际播放/留资数据
 
 ### 短期
-- [ ] 解决ASR质量问题（尝试SenseVoice/faster-whisper 或云端ASR API）
+- [x] 解决ASR质量问题 → v3.2 已换 SenseVoice（如仍不够再评估云端 ASR）
 - [ ] 替换BGM为真实音乐（下载免版税BGM资源）
 - [ ] Web界面升级为 Vue/React SPA（当前纯静态足够；等产品放大/多用户/复杂状态时再上框架）
 
@@ -228,6 +231,7 @@ py -3.12 run.py --web   # 打开 http://127.0.0.1:5000
 py -3.12 run.py input/PNIK4383.MOV --export
 
 # 单元测试
+py -3.12 tests/test_asr.py       # 10/10（SenseVoice 模块，mock 不下载模型）
 py -3.12 tests/test_advisor.py   # 10/10
 py -3.12 tests/test_frontend.py  # 8/8
 ```
@@ -239,5 +243,5 @@ py -3.12 tests/test_frontend.py  # 8/8
 ```
 请先阅读 HANDOFF.md 和 PROGRESS.md 了解项目状态。
 方向已定：驾校内容优化工具（v3 内容优化 + v3.1 前端浅色商务风重构已完成，详见第二章/第四章）。
-下一步：真实教练试用 1-2 家验证"视频→方案→发布→留资"闭环、修 ASR 抗噪（见第七章短期待办）。
+下一步：真实教练试用 1-2 家验证"视频→方案→发布→留资"闭环（ASR 抗噪已在 v3.2 修复，见第七章）。
 ```

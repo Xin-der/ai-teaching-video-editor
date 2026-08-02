@@ -18,6 +18,7 @@ torch>=2.0.0
 # 工具库
 Pillow>=10.0.0
 numpy>=1.24.0
+pypinyin>=0.53.0    # funasr postprocess_hotwords 模糊匹配依赖
 tqdm>=4.65.0
 
 # FunClip 工具（非 pip 包，需单独 clone）
