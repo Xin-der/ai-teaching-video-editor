@@ -129,7 +129,7 @@ function switchTab(name) {
   });
   const panels = { optimize: 'panel-optimize', topics: 'panel-topics' };
   Object.entries(panels).forEach(([k, id]) => {
-    document.getElementById(id).hidden = k !== name;
+    const el = document.getElementById(id); if (el) el.hidden = k !== name;
   });
 }
 

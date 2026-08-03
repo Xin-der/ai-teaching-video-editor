@@ -45,7 +45,7 @@ h1,h2,h3,h4{font-weight:600}
 .btn-text svg{transition:transform .25s}
 .btn-text:hover svg{transform:translateX(3px)}
 .btn-block{width:100%;justify-content:center;margin-top:24px}
-.btn-sm{padding:9px 18px;font-size:14px}
+.btn-sm{padding:10px 18px;font-size:14px}
 
 /* ===== Hero ===== */
 .hero{padding:120px 0 90px;border-bottom:1px solid var(--line-2)}
