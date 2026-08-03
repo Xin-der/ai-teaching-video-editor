@@ -1,7 +1,5 @@
 /* 驾校内容优化工具 · 前端交互 */
-const BLOCKS = [
-  ['①', '诊断'], ['②', '脚本改写'], ['③', '包装'], ['④', '转化话术'], ['⑤', '下期选题'],
-];
+const BLOCKS = ['诊断', '脚本改写', '包装', '转化话术', '下期选题'];
 const KEYS = ['diagnosis', 'script_rewrite', 'packaging', 'conversion', 'next_topics'];
 const LABELS = {
   summary: '诊断', issues: '问题', strengths: '优点',
@@ -91,9 +89,13 @@ function renderPlan(plan) {
 }
 
 function planCard(idx, data, isTopics) {
-  const [num, label] = BLOCKS[idx];
+  const label = BLOCKS[idx];
   const body = isTopics ? renderTopics(data) : renderObj(data);
-  return `<div class="card"><h3 class="card-title"><span class="card-num">${num}</span>${label}</h3>${body}<div class="copy-row"><button class="btn btn-outline btn-sm" onclick="copyBlock(${idx})">📋 复制</button></div></div>`;
+  return `<div class="block">
+    <div class="block-num">0${idx + 1}</div>
+    <div class="block-body"><h3>${label}</h3>${body}</div>
+    <div class="copy-row"><button class="btn btn-text btn-sm" onclick="copyBlock(${idx})">复制 →</button></div>
+  </div>`;
 }
 
 function renderObj(obj) {
@@ -117,6 +119,18 @@ function copyBlock(idx) {
   if (!text) { toast('没有可复制的内容', true); return; }
   if (!navigator.clipboard) { toast('复制失败（需 HTTPS 或 localhost 访问）', true); return; }
   navigator.clipboard.writeText(text).then(() => toast('已复制 ✅')).catch(() => toast('复制失败', true));
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tool-tab').forEach(t => {
+    const on = t.getAttribute('data-tab') === name;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  const panels = { optimize: 'panel-optimize', topics: 'panel-topics' };
+  Object.entries(panels).forEach(([k, id]) => {
+    document.getElementById(id).hidden = k !== name;
+  });
 }
 
 function fmtBlock(obj) {
@@ -227,4 +241,13 @@ document.addEventListener('DOMContentLoaded', () => {
   btn.addEventListener('click', generate);
   sync();
   renderHistory();
+
+  document.querySelectorAll('.tool-tab').forEach(t => {
+    t.addEventListener('click', () => switchTab(t.getAttribute('data-tab')));
+  });
+
+  const io = new IntersectionObserver((es) => {
+    es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { threshold: 0.1, rootMargin: '0px 0px -6% 0px' });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
 });
