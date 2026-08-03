@@ -68,7 +68,7 @@ def test_optimize_api_empty_input_rejected():
 
 def test_css_has_design_tokens():
     css = CSS_PATH.read_text(encoding="utf-8")
-    for token in ("--primary", "--bg", "--surface", "--text", "--border", "--success", "--error"):
+    for token in ("--ink", "--accent", "--line", "--paper", "--maxw", "--success", "--error"):
         assert token in css, f"缺少 token {token}"
     return True
 
@@ -84,6 +84,33 @@ def test_app_js_core_flow():
 def test_app_js_history():
     js = JS_PATH.read_text(encoding="utf-8")
     for needle in ("optimize_history", "localStorage", "renderHistory", "viewHistory", "deleteHistory"):
+        assert needle in js, f"app.js 缺少 {needle}"
+    return True
+
+
+def test_page_has_editorial_sections():
+    """营销前置结构：五块/三步/对比/工具/CTA 五个锚点区块"""
+    from web.app import app
+    client = app.test_client()
+    body = client.get("/").get_data(as_text=True)
+    for anchor in ('id="blocks"', 'id="steps"', 'id="compare"', 'id="tool"', 'id="cta"'):
+        assert anchor in body, f"缺少区块 {anchor}"
+    return True
+
+
+def test_page_has_tool_tabs():
+    """工具区双 Tab：optimize 与 topics 两个面板"""
+    from web.app import app
+    client = app.test_client()
+    body = client.get("/").get_data(as_text=True)
+    for needle in ('data-tab="optimize"', 'data-tab="topics"', 'id="panel-optimize"', 'id="panel-topics"'):
+        assert needle in body, f"缺少 {needle}"
+    return True
+
+
+def test_app_js_tab_switch():
+    js = JS_PATH.read_text(encoding="utf-8")
+    for needle in ("switchTab(", "data-tab", "classList.toggle"):
         assert needle in js, f"app.js 缺少 {needle}"
     return True
 
