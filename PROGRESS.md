@@ -6,6 +6,16 @@
 
 ## 版本演进
 
+### v4 P1（当前）: 前端编辑风重设计（2026-08-04）
+目标：把 v3.1 浅蓝卡片风前端重构成极简编辑风（墨黑+暖橙+发丝边框）营销前置单页，核心工具区双 Tab 可直接使用。
+**当前状态**: 完成（2026-08-04），前端测试 11/11 + 顾问 10/10 + ASR 10/10 通过；HTTP 冒烟验证通过。
+- 页面结构：Nav → 整屏 Hero（meta条）→ 五块拼图 → 三步 → 对比 → ★核心工具（Tab1 优化视频 / Tab2 选题灵感占位 + 历史方案）→ CTA → Footer；导航/CTA 一键滚到工具区
+- 设计语言采用用户参考页 `example_html/index-min.html`：`--ink` 墨黑 + `--accent` 暖橙 + 发丝边框 + 超大排版（Hero 76px）+ 胶囊按钮 + sticky 毛玻璃导航 + 滚动渐显
+- `web/templates/optimize.html` 重写为营销前置骨架；`web/static/css/style.css` 重写 token 与组件；`web/static/js/app.js` 保留核心逻辑 + 新增 `switchTab`（双 Tab）+ 编辑编号行结果渲染 + IntersectionObserver 滚动渐显
+- `tests/test_frontend.py` 升级为 11 项（新 token + 营销前置结构 + 双 Tab 断言）；后端 `web/app.py` 零改动
+- 设计文档 `docs/superpowers/specs/2026-08-02-v4-content-coach-design.md`、实施计划 `docs/superpowers/plans/2026-08-04-p1-frontend-editorial-redesign.md`
+- 过程：子代理驱动 5 任务 + 每任务审查通过（SDD）
+
 ### v3（当前）: 驾校内容优化工具
 目标：教练的素材视频/文字 → AI 生成 5 块《内容优化方案》（诊断/脚本改写/包装/转化话术/下期选题）→ 帮已有内容获客转化（同城）。
 **当前状态**: 开发完成，单元测试 10/10，真实 API（文字+视频）验证通过。
