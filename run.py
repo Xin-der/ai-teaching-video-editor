@@ -30,6 +30,20 @@ load_dotenv()
 from engine import Pipeline
 
 
+def _get_lan_ip() -> str:
+    """探测本机局域网 IP（用于打印 / 自动打开浏览器）；失败回退 127.0.0.1"""
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        return "127.0.0.1"
+
+
 def build_parser() -> argparse.ArgumentParser:
     """构建命令行参数解析器"""
     parser = argparse.ArgumentParser(
@@ -86,11 +100,15 @@ def main():
         try:
             from web.app import app, OUTPUT_DIR
             import webbrowser
-            print(f"\n🌐 启动 Web 界面 → http://127.0.0.1:{args.web_port}")
+            lan_ip = _get_lan_ip()
+            url = f"http://{lan_ip}:{args.web_port}"
+            print(f"\n🌐 启动 Web 界面 → {url}")
+            print(f"   本机访问: http://127.0.0.1:{args.web_port}")
+            print(f"   局域网设备访问: {url}（需防火墙放行 {args.web_port} 端口）")
             print(f"   按 Ctrl+C 停止\n")
-            # 自动打开浏览器
-            webbrowser.open(f"http://127.0.0.1:{args.web_port}")
-            app.run(host="127.0.0.1", port=args.web_port, debug=False)
+            # 自动打开浏览器（局域网 IP）
+            webbrowser.open(url)
+            app.run(host="0.0.0.0", port=args.web_port, debug=False)
         except ImportError as e:
             print(f"❌ 无法启动 Web 界面: {e}")
             print("   请先安装 Flask: py -3.12 -m pip install flask")

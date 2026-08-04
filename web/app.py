@@ -522,7 +522,7 @@ def serve_output(rel_path: str):
 def main():
     import argparse
     ap = argparse.ArgumentParser(description="启动 Web 预览界面")
-    ap.add_argument("--host", default="127.0.0.1", help="监听地址 (默认: 127.0.0.1)")
+    ap.add_argument("--host", default="0.0.0.0", help="监听地址 (默认: 0.0.0.0，局域网可访问)")
     ap.add_argument("--port", type=int, default=5000, help="监听端口 (默认: 5000)")
     ap.add_argument("--debug", action="store_true", help="调试模式")
     args = ap.parse_args()

@@ -117,8 +117,33 @@ function copyBlock(idx) {
   const data = currentPlan ? currentPlan[KEYS[idx]] : null;
   const text = fmtBlock(data);
   if (!text) { toast('没有可复制的内容', true); return; }
-  if (!navigator.clipboard) { toast('复制失败（需 HTTPS 或 localhost 访问）', true); return; }
-  navigator.clipboard.writeText(text).then(() => toast('已复制 ✅')).catch(() => toast('复制失败', true));
+  copyText(text).then(ok => toast(ok ? '已复制 ✅' : '复制失败', !ok));
+}
+
+function copyText(text) {
+  // 优先 Clipboard API（需安全上下文：HTTPS 或 localhost）
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text).then(() => true).catch(() => legacyCopy(text));
+  }
+  return Promise.resolve(legacyCopy(text));
+}
+
+function legacyCopy(text) {
+  // 非安全上下文（局域网 / 手机 http 访问）降级：临时 textarea + execCommand
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '0';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) { return false; }
 }
 
 function switchTab(name) {

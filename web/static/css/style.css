@@ -130,9 +130,10 @@ select.input{cursor:pointer}
 
 /* ===== 结果（编辑编号行） ===== */
 #result{margin-top:56px}
-#result .block{padding:40px 0}
+#result .block{grid-template-columns:80px 1fr;padding:32px 0}
+#result .block .copy-row{grid-column:2;text-align:left;margin-top:6px}
 .field{display:flex;gap:10px;margin-bottom:8px;font-size:14px}
-.field .k{flex-shrink:0;color:var(--ink-3);min-width:72px;font-size:13px;padding-top:2px}
+.field .k{flex-shrink:0;color:var(--ink-3);min-width:56px;font-size:13px;padding-top:2px}
 .copy-row{margin-top:14px;text-align:right}
 
 /* ===== 历史 ===== */
@@ -172,7 +173,9 @@ footer{padding:40px 0}
 
 /* ===== 响应式 ===== */
 @media (max-width:760px){
-  .nav-links{display:none}
+  .nav-links{display:flex;gap:16px;font-size:13px}
+  .nav-cta{padding:7px 14px;font-size:13px}
+  .logo{font-size:13px}
   section{padding:80px 0}
   .hero{padding:80px 0 60px}
   .meta-strip{flex-wrap:wrap;gap:28px;margin-top:48px}
