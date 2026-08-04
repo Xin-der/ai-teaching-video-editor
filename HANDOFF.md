@@ -1,6 +1,6 @@
 # 项目交接文档
 
-> 最后更新: 2026-08-04 | 状态: v4 P1 前端编辑风重设计 + P1.1 核心修复 + P2 帧点评 全部完成
+> 最后更新: 2026-08-04 | 状态: v4 P1 前端重设计 + P1.1 核心修复 + P2 帧点评 + P3 选题灵感 全部完成
 
 ---
 
@@ -10,7 +10,7 @@
 
 **核心目标**: 教练的素材视频/文字 → AI 生成 5 块《内容优化方案》（诊断 / 脚本改写 / 包装 / 转化话术 / 下期选题）→ 照着改、照着发，帮驾校同城获客
 
-**当前阶段**: v4 P1（前端编辑风重设计）+ **P1.1 核心修复**（缓存隔离 + 输入泛化）+ **P2 帧点评**（自动挑问题帧 + VLM 诊断 + 标注框）全部完成（2026-08-04）。当前单测 顾问 18/18 + 前端 11/11 + ASR 10/10。此前 v3.2（2026-08-02）ASR 抗噪升级：SenseVoice-Small + fsmn-vad + 驾考热词替换 paraformer，车内噪音场景转录从"碎片化不可读"提升到"成句可读、考试播报干净"；CPU 推理 ~38× 实时，完整 optimize 流程端到端验证通过。
+**当前阶段**: v4 P1（前端编辑风重设计）+ P1.1 核心修复（缓存隔离 + 输入泛化）+ P2 帧点评（自动挑问题帧 + VLM 诊断 + 标注框）+ **P3 选题灵感**（精选库 + AI 生成更多 + 轻量行业配置）全部完成（2026-08-04）。当前单测 顾问 18/18 + 前端 13/13 + 选题 9/9 + ASR 10/10。此前 v3.2（2026-08-02）ASR 抗噪升级：SenseVoice-Small + fsmn-vad + 驾考热词替换 paraformer，车内噪音场景转录从"碎片化不可读"提升到"成句可读、考试播报干净"；CPU 推理 ~38× 实时，完整 optimize 流程端到端验证通过。
 
 ---
 
@@ -65,10 +65,22 @@
 - **测试**: 顾问 18/18 + 前端 11/11 + ASR 10/10（新增：帧诊断挑选/规范化/降级、方案携带 frames、markdown 仅文字诊断、合成场景 4 项）
 - **成本提醒**: 每次视频 optimize 新增 ≤4 次 VLM 帧诊断调用；后续可与 `_describe_frames` 的调用合并（一次返回描述+诊断）省约一半 VLM 成本
 
-### v4 后续（P2 → P3 → P4）
+### v4 P3 选题灵感（完成，2026-08-04 晚）
 
-- [ ] **P2 帧点评**（后端独立，最先做）：`engine/frame_diagnose.py` + `/api/optimize` 响应加 `frames` 字段 + 前端标注框渲染
-- [ ] **P3 选题灵感**：`engine/industry_config.py`（轻量行业配置）+ `knowledge/driving_exam_topics.json` + `/api/topics/generate` + 前端 Tab2 填充
+给内容教练工作台补齐"不知道该拍什么"的入口：Tab2【选题灵感】= 精选选题库（秒开零成本）+ AI 生成更多（城市/季节/热点半自动）。设计见 v4 spec 第五章。
+
+- **精选选题库** `knowledge/driving_exam_topics.json`: 16 条驾考选题，`{id,title,description,category,tags,difficulty}`，覆盖挂科点/考试季/新规/招生/技巧/学员故事（从 `driving_exam.json` 高频话题+学员搜索意图撰写）
+- **轻量行业配置** `engine/industry_config.py`: `get_industry_config(industry)` 返回知识库/选题库路径+行业名+prompt 提示语，未知行业回退默认；仅实现 `driving_exam`，未迁移现有知识库（有第二行业再抽目录化）
+- **AI 生成更多** `analyzer.generate_topics()`: 注入行业知识库+城市+季节/节点+热点 → LLM 生成 `[{title,description,why_now,shooting_idea}]`；失败自动重试一次；`_validate_topics` 补全字段/过滤非法项
+- **API** `web/app.py`: `GET /api/topics`（静态选题库，`?industry=` 可选）+ `POST /api/topics/generate`（后台线程 + `/status` 轮询，与 optimize 同模式，count 收敛 1-10）。修复：同步路由需先 `sys.path.insert(0, ROOT)` 再 import engine（脚本运行 sys.path[0]=web/）
+- **前端** Tab2 占位替换为真实 UI：精选库卡片（分类/难度/标签/复制）+ 生成表单（城市 + 季节下拉 + 热点输入）+ 结果卡片（编号/为什么现在发/拍摄思路/复制）；`app.js` 新增 loadTopics/renderTopicList/generateTopics/pollTopicsStatus/copyTopic 等
+- **真实验证**: HTTP 冒烟——GET /api/topics 返回 16 条；真实 LLM 生成 5 条选题（城市=长沙/季节=暑期/热点=电子考官）约 30s 完成、格式正确
+- **测试**: 新增 `tests/test_topics.py` 9 项（选题库 schema、行业配置与回退、prompt 注入、_validate_topics、generate_topics 重试、/api/topics、后台线程流转、409 并发拒绝）；前端新增 2 项 Tab2 断言。当前单测 顾问 18/18 + 前端 13/13 + 选题 9/9 + ASR 10/10
+
+### v4 后续（P4）
+
+- [x] **P2 帧点评** → 完成（2026-08-04 晚）
+- [x] **P3 选题灵感** → 完成（2026-08-04 晚）
 - [ ] **P4 部署 + 运维手册**：跨平台改造（ffmpeg 路径/pathlib/启动脚本）+ waitress + CF Tunnel / 云服务器 + 运维手册（P1-P3 完成后做）
 
 ---
@@ -120,7 +132,9 @@ ai-teaching-video-editor/
 │   ├── advisor.py                 ← 内容顾问（编排 + write_plan_markdown）
 │   ├── asr.py                     ← SenseVoice ASR（抗噪转录 + 驾考热词 + 模型单例）
 │   ├── pipeline.py                ← 7步管线（音频→ASR→场景→VLM→LLM→分段→评分）
-│   ├── analyzer.py                ← LLM 内容分析器（qwen3.7-plus，知识点提取/文案生成/风格分析）
+│   ├── analyzer.py                ← LLM 内容分析器（方案 5 块 / 选题生成 / 文案 / 风格分析）
+│   ├── frame_diagnose.py          ← 帧诊断（VLM 诊断 + 挑最严重 top3 + 标注框）v4 P2
+│   ├── industry_config.py         ← 行业配置接口（轻量，驾考先行）v4 P3
 │   ├── scorer.py                  ← 5维度规则评分（旧流程遗留，新方向不调用）
 │   └── exporter.py                ← ffmpeg CLI 导出（旧流程遗留，新方向不调用）
 ├── templates/                     ← 平台模板
@@ -129,18 +143,20 @@ ai-teaching-video-editor/
 │   ├── xiaohongshu.json           ← 1:1方形 | KeyPoints要点 | BGM音量40%
 │   └── custom/                    ← 用户自定义模板目录
 ├── knowledge/
-│   └── driving_exam.json          ← 驾考知识库（12个话题+扣分点+关键词+文案模板）
+│   ├── driving_exam.json          ← 驾考知识库（12个话题+扣分点+关键词+文案模板）
+│   └── driving_exam_topics.json   ← 驾考精选选题库（16条，Tab2 选题灵感）v4 P3
 ├── assets/
 │   └── bgm/default_bgm.m4a        ← 默认BGM（C大调和弦进行，16s循环）
 ├── web/                           ← Web 产品站（Flask）
-│   ├── app.py                     ← API服务（optimize/status/静态托管/旧导出接口）
+│   ├── app.py                     ← API服务（optimize/status/topics 选题/静态托管/旧导出接口）
 │   ├── templates/optimize.html    ← 编辑风营销前置骨架（Nav/Hero/五块/三步/对比/双Tab工具区/CTA/Footer）
 │   └── static/
 │       ├── css/style.css          ← 设计系统（编辑风：墨黑+暖橙 token + 发丝边框 + 组件 + 响应式）
-│       └── js/app.js              ← 交互逻辑（生成/轮询/渲染/复制/历史/双Tab切换）
+│       └── js/app.js              ← 交互逻辑（优化生成 / 选题灵感 / 轮询 / 渲染 / 复制 / 历史 / 双Tab）
 ├── run.py                         ← CLI 入口
 ├── RUN.bat / RUN_WEB.bat          ← Windows 一键启动
 ├── tests/test_export.py           ← 导出测试
+├── tests/test_topics.py           ← 选题灵感测试（v4 P3，9 项）
 └── PROGRESS.md                    ← 详细进度记录
 ```
 
@@ -243,7 +259,7 @@ ai-teaching-video-editor/
 - [x] P1 前端编辑风重设计 → 完成（2026-08-04，营销前置 + 双 Tab 工具区）
 - [x] P1.1 核心修复（优化缓存隔离 + 输入泛化）→ 完成（2026-08-04 晚）
 - [x] P2 帧点评（自动挑问题帧 + VLM 诊断 + 标注框）→ 完成（2026-08-04 晚）
-- [ ] P3 选题灵感（精选库 + AI 生成更多 + 轻量行业配置）→ 下一步
+- [x] P3 选题灵感（精选库 + AI 生成更多 + 轻量行业配置）→ 完成（2026-08-04 晚）
 - [ ] P4 部署 + 运维手册（CF Tunnel 试用 / 云服务器正式，跨平台改造 + waitress）
 
 ### 已知 UI 布局/设计问题（审查 2026-08-04；修复 2026-08-04 晚）
@@ -321,7 +337,7 @@ py -3.12 tests/test_frontend.py  # 11/11
 
 ```
 请先阅读 HANDOFF.md 和 PROGRESS.md 了解项目状态。
-方向已定：驾校内容优化工具 → 内容教练工作台（v4，行业可配置·驾考先行；模块化 + 内容教练叙事）。已完成：v3 内容优化 + v3.1 前端 + v3.2 ASR 抗噪 + v4 P1 前端编辑风重设计 + v4 P1.1 核心修复（缓存隔离 + 输入泛化）+ v4 P2 帧点评（详见第二/三/五章）。
-下一步：P3 选题灵感（精选库 + AI 生成更多 + 轻量行业配置，详见 v4 spec 第五章）→ P4 部署 + 运维手册。真实教练试用（docs/trial/）与反馈循环可并行推进。
+方向已定：驾校内容优化工具 → 内容教练工作台（v4，行业可配置·驾考先行；模块化 + 内容教练叙事）。已完成：v3 内容优化 + v3.1 前端 + v3.2 ASR 抗噪 + v4 P1 前端编辑风重设计 + v4 P1.1 核心修复（缓存隔离 + 输入泛化）+ v4 P2 帧点评 + v4 P3 选题灵感（精选库 + AI 生成更多 + 轻量行业配置）（详见第二/三/五章）。
+下一步：P4 部署 + 运维手册（跨平台改造 + waitress + CF Tunnel / 云服务器 + 两套运维手册）。真实教练试用（docs/trial/）与反馈循环可并行推进。
 协作注意：尽量轻量直接，别套重流程；superpowers 技能默认不用、用户明确要求才用；拿不准的开头一次性确认。
 ```

@@ -33,6 +33,9 @@ _export_status = {"running": False, "progress": "", "results": [], "error": None
 # 内容优化任务状态
 _optimize_status = {"running": False, "progress": "", "plan": None, "error": None, "markdown_path": None}
 
+# 选题生成任务状态
+_topics_status = {"running": False, "progress": "", "topics": None, "error": None}
+
 # 缓存视频信息
 _video_info_cache = None
 
@@ -410,6 +413,91 @@ def _run_optimize(payload):
     except Exception as e:
         _optimize_status["error"] = str(e)
         _optimize_status["running"] = False
+
+
+# ---------------------------------------------------------------------------
+# API: 选题灵感
+# ---------------------------------------------------------------------------
+
+@app.route("/api/topics")
+def api_topics():
+    """返回精选选题库（静态 JSON，秒开，零 LLM 成本）"""
+    engine_path = str(ROOT)
+    if engine_path not in sys.path:
+        sys.path.insert(0, engine_path)
+    from engine.industry_config import get_industry_config
+    industry = request.args.get("industry", "driving_exam")
+    cfg = get_industry_config(industry)
+    path = Path(cfg["topics_path"])
+    if not path.exists():
+        return jsonify({"error": "选题库不存在"}), 404
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return jsonify(data)
+
+
+@app.route("/api/topics/generate", methods=["POST"])
+def api_topics_generate():
+    """触发 AI 生成更多选题（后台线程 + 状态轮询，与 /api/optimize 同模式）"""
+    global _topics_status
+    if _topics_status["running"]:
+        return jsonify({"error": "正在生成中，请稍候"}), 409
+
+    req = request.get_json(silent=True) or {}
+    try:
+        count = max(1, min(int(req.get("count") or 5), 10))
+    except (TypeError, ValueError):
+        count = 5
+    payload = {
+        "city": (req.get("city") or "").strip(),
+        "season": (req.get("season") or "").strip(),
+        "hot_topic": (req.get("hot_topic") or "").strip(),
+        "industry": (req.get("industry") or "driving_exam").strip(),
+        "count": count,
+    }
+
+    _topics_status = {"running": True, "progress": "生成中...", "topics": None, "error": None}
+    threading.Thread(target=_run_generate_topics, args=(payload,), daemon=True).start()
+    return jsonify({"status": "started"})
+
+
+@app.route("/api/topics/generate/status")
+def api_topics_generate_status():
+    """查询 AI 生成选题状态"""
+    return jsonify(_topics_status)
+
+
+def _run_generate_topics(payload):
+    """后台线程：调用 analyzer.generate_topics 生成一批选题"""
+    global _topics_status
+    try:
+        engine_path = str(ROOT)
+        if engine_path not in sys.path:
+            sys.path.insert(0, engine_path)
+
+        from engine.analyzer import ContentAnalyzer
+
+        _topics_status["progress"] = "正在结合城市/季节/热点策划选题..."
+        analyzer = ContentAnalyzer()
+        result = analyzer.generate_topics(
+            city=payload.get("city", ""),
+            season=payload.get("season", ""),
+            hot_topic=payload.get("hot_topic", ""),
+            industry=payload.get("industry", "driving_exam"),
+            count=payload.get("count", 5),
+        )
+        if result.get("_error") or result.get("_parse_error"):
+            _topics_status["error"] = (
+                str(result.get("_error") or "AI 返回内容解析失败，请重试")
+            )
+            _topics_status["running"] = False
+            return
+        _topics_status["topics"] = result.get("topics", [])
+        _topics_status["progress"] = "完成"
+        _topics_status["running"] = False
+    except Exception as e:
+        _topics_status["error"] = str(e)
+        _topics_status["running"] = False
 
 
 # ---------------------------------------------------------------------------

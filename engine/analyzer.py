@@ -124,6 +124,33 @@ class ContentAnalyzer:
             return result  # 交给上层报错
         return self._validate_plan(result)
 
+    def generate_topics(self, city: str = "", season: str = "",
+                        hot_topic: str = "", industry: str = "driving_exam",
+                        count: int = 5) -> dict:
+        """AI 生成一批选题灵感。LLM 失败自动重试一次。
+
+        Args:
+            city: 所在城市（用于同城选题）
+            season: 当前季节/节点（如：暑期、开学季）
+            hot_topic: 运营者手动填写的热点/想蹭的点（半自动）
+            industry: 行业 id（当前仅 driving_exam，未知回退默认）
+            count: 生成条数
+
+        Returns:
+            {"topics": [{"title", "description", "why_now", "shooting_idea"}]}
+            失败时含 "_error"/"_parse_error"，交由上层报错
+        """
+        prompt = self._build_topics_prompt(
+            city=city, season=season, hot_topic=hot_topic,
+            industry=industry, count=count,
+        )
+        result = self._call_llm(prompt)
+        if result.get("_error") or result.get("_parse_error"):
+            result = self._call_llm(prompt)
+        if result.get("_error") or result.get("_parse_error"):
+            return result
+        return self._validate_topics(result)
+
     # ------------------------------------------------------------------
     # 内部方法
     # ------------------------------------------------------------------
@@ -248,6 +275,77 @@ class ContentAnalyzer:
                 for sub, val in dflt.items():
                     plan[key].setdefault(sub, val)
         return plan
+
+    def _build_topics_prompt(self, city: str = "", season: str = "",
+                             hot_topic: str = "", industry: str = "driving_exam",
+                             count: int = 5) -> str:
+        """构建选题灵感 prompt：注入行业知识库 + 城市 + 季节/节点 + 热点。"""
+        from engine.industry_config import get_industry_config
+        cfg = get_industry_config(industry)
+        domain_name = cfg["name"]
+        prompt_hint = cfg["topic_prompt_hint"]
+
+        kb_lines = []
+        for t in self.knowledge.get("high_frequency_topics", [])[:10]:
+            kp = " / ".join(t.get("deduction_points", [])[:3])
+            kb_lines.append(f"- {t['topic']}: {kp}")
+        kb_text = "\n".join(kb_lines) or "- (无)"
+
+        city_text = city or "未指定（不要虚构城市）"
+        season_text = season or "未指定"
+        hot_text = hot_topic or "无"
+
+        prompt = f"""你是一个深耕内容运营的短视频选题策划，擅长{domain_name}领域。{prompt_hint}
+
+【领域知识（参考它判断学员在搜什么，不用逐条照搬）】
+{kb_text}
+
+【所在城市】{city_text}
+【当前季节/节点】{season_text}
+【热点/想蹭的点（运营者手动提供）】{hot_text}
+
+请基于以上信息，策划 {count} 条当下值得拍摄的短视频选题。要求：
+1. 每条选题贴合学员的搜索痛点（怎么过、去哪学、多少钱、难不难）。
+2. 结合城市与季节/节点给出"为什么现在发"的理由。
+3. 拍摄思路要具体可执行（在哪拍、拍什么、怎么开头）。
+4. 标题要口语化、有钩子，适合短视频平台。
+5. 与热点相关才结合热点；无热点时不要强行蹭。
+
+请只返回如下 JSON，不要输出任何其他文字：
+
+{{
+  "topics": [
+    {{
+      "title": "选题标题，带钩子",
+      "description": "一句话说明这条讲什么",
+      "why_now": "为什么现在发（结合季节/节点/热点/学员需求）",
+      "shooting_idea": "拍摄思路（场景/画面/开头/时长）"
+    }}
+  ]
+}}
+
+规则：
+1. 标题 ≤ 30 字，口语化，避免套话。
+2. topics 必须刚好 {count} 条。"""
+        return prompt
+
+    def _validate_topics(self, result: dict) -> dict:
+        """确保选题结构完整，缺失字段补空串。"""
+        topics = result.get("topics") if isinstance(result, dict) else None
+        if not isinstance(topics, list):
+            topics = []
+        cleaned = []
+        for t in topics:
+            if not isinstance(t, dict):
+                continue
+            cleaned.append({
+                "title": str(t.get("title", "")).strip(),
+                "description": str(t.get("description", "")).strip(),
+                "why_now": str(t.get("why_now", "")).strip(),
+                "shooting_idea": str(t.get("shooting_idea", "")).strip(),
+            })
+        result["topics"] = cleaned
+        return result
 
     def _build_analysis_prompt(self, transcript: str, vlm_summary: dict,
                                 duration: float) -> str:

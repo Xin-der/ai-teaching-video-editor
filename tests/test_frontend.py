@@ -115,6 +115,25 @@ def test_app_js_tab_switch():
     return True
 
 
+def test_page_has_topics_panel_content():
+    """Tab2 选题面板包含 精选选题库 / AI 生成更多 与关键控件"""
+    from web.app import app
+    client = app.test_client()
+    body = client.get("/").get_data(as_text=True)
+    for needle in ("精选选题库", "AI 生成更多", 'id="topic-list"', 'id="topic-city"',
+                   'id="topic-season"', 'id="topic-hot"', 'id="gen-topics-btn"', 'id="topics-result"'):
+        assert needle in body, f"缺少 {needle}"
+    return True
+
+
+def test_app_js_topics_flow():
+    js = JS_PATH.read_text(encoding="utf-8")
+    for needle in ("loadTopics(", "renderTopicList(", "generateTopics(", "pollTopicsStatus(",
+                   "copyTopic(", "copyGeneratedTopic(", "/api/topics"):
+        assert needle in js, f"app.js 缺少 {needle}"
+    return True
+
+
 def main():
     tests = [(name, fn) for name, fn in globals().items()
              if name.startswith("test_") and callable(fn)]

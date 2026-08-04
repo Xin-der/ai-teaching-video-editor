@@ -148,6 +148,22 @@ select.input{cursor:pointer}
 .frame-problem .tag{color:var(--accent);font-weight:500}
 .frame-problem .muted{margin-left:2px}
 
+/* ===== 选题灵感 ===== */
+.topics-sec{margin-bottom:48px}
+.topics-h{font-size:20px;font-weight:600;letter-spacing:-0.02em;margin-bottom:8px}
+.topics-sec > .muted{margin-bottom:20px}
+.topic-card{border-top:1px solid var(--line);padding:24px 0}
+.topic-head{display:flex;gap:14px;align-items:baseline;margin-bottom:8px}
+.topic-cat{font-size:12px;color:var(--accent);font-weight:500;letter-spacing:0.04em}
+.topic-diff{font-size:12px;color:var(--ink-3)}
+.topic-title{font-size:19px;font-weight:600;letter-spacing:-0.02em;margin-bottom:8px;line-height:1.35}
+.topic-desc{font-size:14px;color:var(--ink-2);line-height:1.55;margin-bottom:10px}
+.topic-tags{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.topic-tags .tag{font-size:12px;color:var(--accent);font-weight:500}
+.topic-card.generated{padding:28px 0}
+.topic-card.generated .block-num{margin-bottom:12px}
+#topics-result .topic-card:first-child{border-top:1px solid var(--line)}
+
 /* ===== 历史 ===== */
 .history{margin-top:72px;border-top:1px solid var(--line);padding-top:40px}
 .history-head{margin-bottom:24px}
