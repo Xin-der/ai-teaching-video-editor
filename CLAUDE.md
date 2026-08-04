@@ -5,6 +5,11 @@
 - **提交消息末尾不要加 `Co-Authored-By: Claude` 署名行**。提交身份始终是项目自己的 git 用户（Xin-der）。
 - 只有用户明确要求时才 `git push`。
 
+## 关于superpowers SKILL的使用说明
+
+- **现在项目状态默认不使用此skill**
+- 只有当用户明确要求时才使用相关skill
+
 ## 项目状态
 
 - 项目状态/方向/待办看 **HANDOFF.md** 和 **PROGRESS.md**，开工前先读。
