@@ -10,11 +10,16 @@
 
 import json
 import os
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# 少于该字数的转录视为"内容过短"，不足以生成 5 块完整方案
+MIN_TRANSCRIPT_CHARS = 10
 
 
 def write_plan_markdown(plan: dict, out_path: str) -> str:
@@ -80,8 +85,18 @@ class ContentAdvisor:
         else:
             return {"error": "请上传视频或粘贴文字"}
 
-        if not transcript or not transcript.strip():
-            return {"error": "没有听到说话内容，请换一个视频或粘贴文字"}
+        transcript = transcript.strip()
+        if not transcript:
+            return {"error": (
+                "没有检测到说话内容。请换一段有讲解的教学视频（5-15 分钟最佳），"
+                "或直接粘贴文字脚本。"
+            )}
+
+        if len(transcript) < MIN_TRANSCRIPT_CHARS:
+            return {"error": (
+                f"这段内容太短（仅约 {len(transcript)} 个字），AI 还不足以生成完整方案。\n\n"
+                "请上传一段有完整讲解的教学视频，或粘贴更完整的文字脚本。"
+            )}
 
         from engine.analyzer import ContentAnalyzer
         analyzer = ContentAnalyzer()
@@ -98,7 +113,15 @@ class ContentAdvisor:
         """复用 Pipeline 的 ASR + VLM。返回 (transcript_str, vlm_summary_dict)。"""
         from engine.pipeline import Pipeline
 
-        p = Pipeline(video_path, work_dir=str(self.work_dir))
+        # 每次分析用独立工作目录。Pipeline 的中间产物（audio.wav /
+        # asr_result.json / scenes.json / frame_descriptions.json）都是固定文件名，
+        # 若共用 work_dir，下一个视频会直接命中上一个视频的缓存而永不真正转写。
+        run_dir = self.work_dir / (
+            f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        )
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        p = Pipeline(video_path, work_dir=str(run_dir))
         p._probe_video()
         segs = p.extract_transcript()
         transcript = " ".join(s.get("text", "") for s in segs)

@@ -184,6 +184,75 @@ def test_cli_optimize_text_runs():
     return True
 
 
+def test_build_plan_video_isolated_workdir():
+    """视频路径每次分析用独立工作目录，避免复用上一个视频的固定文件名缓存"""
+    import os
+    import tempfile
+    from unittest import mock
+    from engine.advisor import ContentAdvisor
+
+    with tempfile.TemporaryDirectory() as tmp:
+        advisor = ContentAdvisor(work_dir=tmp)
+        fake1 = os.path.join(tmp, "video_a.mp4")
+        fake2 = os.path.join(tmp, "video_b.mp4")
+        open(fake1, "w").close()
+        open(fake2, "w").close()
+
+        with mock.patch("engine.pipeline.Pipeline") as M:
+            M.return_value.extract_transcript.return_value = [
+                {"start": 0, "end": 1, "text": "视频A的转录"}
+            ]
+            M.return_value.extract_visuals.return_value = []
+            advisor._analyze_video(fake1)
+            advisor._analyze_video(fake2)
+
+        workdirs = [c.kwargs.get("work_dir") for c in M.call_args_list]
+        assert len(workdirs) == 2, "应针对两个视频各创建一次 Pipeline"
+        assert workdirs[0] != workdirs[1], \
+            "两次视频分析复用了同一工作目录——新视频会读到旧 audio.wav/asr_result.json 缓存"
+        for w in workdirs:
+            assert w.startswith(tmp), "工作目录应位于 advisor 的 work_dir 之下"
+    return True
+
+
+def test_build_plan_insufficient_transcript_clear_error():
+    """转录/文字过短 → 返回友好错误，不进入 LLM 生成"""
+    import os
+    import tempfile
+    from unittest import mock
+    from engine.advisor import ContentAdvisor
+
+    advisor = ContentAdvisor(work_dir="work")
+    # 文字过短
+    r = advisor.build_plan(text="系。")
+    assert "error" in r and "太短" in r["error"], f"文字过短应提示太短: {r}"
+
+    # 视频转录过短（打桩 _analyze_video，避免真实 ASR）
+    with mock.patch.object(ContentAdvisor, "_analyze_video",
+                           return_value=("系。", {})):
+        with tempfile.TemporaryDirectory() as tmp:
+            v = os.path.join(tmp, "x.mp4")
+            open(v, "w").close()
+            r2 = advisor.build_plan(video_path=v)
+    assert "error" in r2 and "太短" in r2["error"], f"视频转录过短应提示太短: {r2}"
+    return True
+
+
+def test_plan_prompt_supports_generic_content():
+    """方案 prompt 对非驾考内容也能按实际内容输出（不强行套驾考框架）"""
+    from engine.analyzer import ContentAnalyzer
+    a = ContentAnalyzer()
+    prompt = a._build_plan_prompt(
+        "这是一段讲做菜的短视频", {"topics": ["其他"], "visuals": []},
+        city="", platform="douyin",
+    )
+    assert "不是驾考" in prompt, "prompt 应声明非驾考内容按实际主题处理"
+    assert "实际内容" in prompt, "prompt 应强调基于实际内容"
+    for key in ("diagnosis", "script_rewrite", "packaging", "conversion", "next_topics"):
+        assert key in prompt, f"prompt 缺少 {key}"
+    return True
+
+
 def main():
     tests = [(name, fn) for name, fn in globals().items()
              if name.startswith("test_") and callable(fn)]
