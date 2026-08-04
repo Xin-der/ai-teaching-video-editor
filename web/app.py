@@ -31,7 +31,7 @@ app = Flask(__name__)
 _export_status = {"running": False, "progress": "", "results": [], "error": None}
 
 # 内容优化任务状态
-_optimize_status = {"running": False, "progress": "", "plan": None, "error": None, "markdown_path": None}
+_optimize_status = {"running": False, "progress": "", "plan": None, "error": None, "markdown_path": None, "plan_id": None}
 
 # 选题生成任务状态
 _topics_status = {"running": False, "progress": "", "topics": None, "error": None}
@@ -46,8 +46,67 @@ _video_info_cache = None
 
 @app.route("/")
 def index():
-    """主页面：内容优化工具"""
-    return render_template("optimize.html")
+    """首页：价值主张 + 示例方案 + 入口"""
+    return render_template("index.html", active="home")
+
+
+@app.route("/optimize")
+def optimize_page():
+    """优化工作台"""
+    return render_template("optimize.html", active="optimize")
+
+
+@app.route("/topics")
+def topics_page():
+    """选题库"""
+    return render_template("topics.html", active="topics")
+
+
+@app.route("/history")
+def history_page():
+    """历史方案列表"""
+    return render_template("history.html", active="history")
+
+
+@app.route("/plan/<plan_id>")
+def plan_page(plan_id: str):
+    """方案详情页：读取 output/optimize/plan_<id>.json"""
+    import re
+    if not re.fullmatch(r"\d{8}_\d{6}", plan_id):
+        return "方案不存在", 404
+    path = OUTPUT_DIR / "optimize" / f"plan_{plan_id}.json"
+    if not path.exists():
+        return "方案不存在", 404
+    with open(path, "r", encoding="utf-8") as f:
+        plan = json.load(f)
+    return render_template("plan.html", plan=plan, active="history")
+
+
+# ---------------------------------------------------------------------------
+# Plan → Blocks 内容模型
+# ---------------------------------------------------------------------------
+
+PLAN_BLOCK_DEFS = [
+    ("diagnosis", "内容诊断"),
+    ("script_rewrite", "脚本改写"),
+    ("packaging", "标题包装"),
+    ("conversion", "转化话术"),
+    ("next_topics", "下期选题"),
+]
+
+
+def _plan_to_blocks(plan: dict) -> list:
+    """把 advisor 返回的 plan 规范化为 blocks 数组。
+    新增产出类型时在 PLAN_BLOCK_DEFS 注册即可，页面结构不变。"""
+    blocks = []
+    for key, title in PLAN_BLOCK_DEFS:
+        data = plan.get(key)
+        if data:
+            blocks.append({"type": key, "title": title, "data": data})
+    frames = plan.get("frames") or []
+    if frames:
+        blocks.append({"type": "frame_review", "title": "帧点评", "data": frames})
+    return blocks
 
 
 # ---------------------------------------------------------------------------
@@ -367,7 +426,7 @@ def api_optimize():
         if not payload["text"]:
             return jsonify({"error": "请上传视频或粘贴文字"}), 400
 
-    _optimize_status = {"running": True, "progress": "准备生成...", "plan": None, "error": None, "markdown_path": None}
+    _optimize_status = {"running": True, "progress": "准备生成...", "plan": None, "error": None, "markdown_path": None, "plan_id": None}
     threading.Thread(target=_run_optimize, args=(payload,), daemon=True).start()
     return jsonify({"status": "started"})
 
@@ -406,8 +465,26 @@ def _run_optimize(payload):
         out_dir = OUTPUT_DIR / "optimize"
         out_dir.mkdir(parents=True, exist_ok=True)
         from datetime import datetime
-        md_path = str(out_dir / f"plan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md")
+        now = datetime.now()
+        plan_id = now.strftime('%Y%m%d_%H%M%S')
+        md_path = str(out_dir / f"plan_{plan_id}.md")
         _optimize_status["markdown_path"] = write_plan_markdown(plan, md_path)
+
+        # 同步保存 JSON（Plan → Blocks 内容模型），供详情页 / 历史列表使用
+        plan_json = {
+            "id": plan_id,
+            "created_at": now.strftime('%Y-%m-%d %H:%M'),
+            "city": payload.get("city", ""),
+            "platform": payload.get("platform", "douyin"),
+            "summary": (plan.get("diagnosis") or {}).get("summary", ""),
+            "blocks": _plan_to_blocks(plan),
+            "markdown_path": _optimize_status["markdown_path"],
+        }
+        json_path = out_dir / f"plan_{plan_id}.json"
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(plan_json, f, ensure_ascii=False)
+        _optimize_status["plan_id"] = plan_id
+
         _optimize_status["progress"] = "完成"
         _optimize_status["running"] = False
     except Exception as e:
@@ -498,6 +575,33 @@ def _run_generate_topics(payload):
     except Exception as e:
         _topics_status["error"] = str(e)
         _topics_status["running"] = False
+
+
+# ---------------------------------------------------------------------------
+# API: 方案列表（历史页）
+# ---------------------------------------------------------------------------
+
+@app.route("/api/plans")
+def api_plans():
+    """列出所有已生成的方案（新的在前）"""
+    opt_dir = OUTPUT_DIR / "optimize"
+    if not opt_dir.exists():
+        return jsonify({"plans": []})
+    plans = []
+    for f in sorted(opt_dir.glob("plan_*.json"), reverse=True):
+        try:
+            with open(f, "r", encoding="utf-8") as fp:
+                data = json.load(fp)
+            plans.append({
+                "id": data.get("id", f.stem.replace("plan_", "")),
+                "created_at": data.get("created_at", ""),
+                "city": data.get("city", ""),
+                "platform": data.get("platform", ""),
+                "summary": data.get("summary", ""),
+            })
+        except Exception:
+            continue
+    return jsonify({"plans": plans})
 
 
 # ---------------------------------------------------------------------------

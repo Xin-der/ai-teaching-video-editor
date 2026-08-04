@@ -1,133 +1,16 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>驾校内容优化工具</title>
-<link rel="stylesheet" href="/static/css/style.css">
-</head>
-<body>
+{% extends "base.html" %}
+{% block title %}优化工作台 · 驾校内容优化工具{% endblock %}
+{% block content %}
 
-<nav class="nav">
-  <div class="nav-inner">
-    <a class="logo" href="#tool"><span class="logo-dot"></span>驾校内容优化工具</a>
-    <div class="nav-links">
-      <a href="#blocks">功能</a>
-      <a href="#steps">流程</a>
-      <a href="#tool">选题</a>
-    </div>
-    <a class="nav-cta" href="#tool">开始使用</a>
-  </div>
-</nav>
-
-<header class="hero">
-  <div class="wrap">
-    <div class="hero-inner">
-      <div class="eyebrow">驾校内容，重新设计</div>
-      <h1>让每条视频，<br>都带来 <em class="em">学员</em>。</h1>
-      <p class="lede">上传教练的拍摄素材或口播文字，AI 五分钟生成一整套内容优化方案——从诊断到选题，照着改，照着发。</p>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="#tool">立即体验</a>
-        <a class="btn btn-text" href="#blocks">了解它如何工作
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
-        </a>
-      </div>
-    </div>
-    <div class="meta-strip">
-      <div class="meta-item"><div class="mv">5 块</div><div class="ml">完整优化方案</div></div>
-      <div class="meta-item"><div class="mv">3 分钟</div><div class="ml">快速出稿</div></div>
-      <div class="meta-item"><div class="mv">0 上传</div><div class="ml">原片不出本机</div></div>
-      <div class="meta-item"><div class="mv">同城</div><div class="ml">精准获客</div></div>
-    </div>
-  </div>
-</header>
-
-<section id="blocks">
+<section class="tool">
   <div class="wrap">
     <div class="sec-head reveal">
-      <div class="sec-tag">功能</div>
-      <h2>一套方案，五块拼图。</h2>
-      <p>不是一段文案，是一整套能照着做的优化方案。每一块都解决一个具体问题。</p>
-    </div>
-    <div class="blocks">
-      <div class="block reveal">
-        <div class="block-num">01</div>
-        <div class="block-body"><h3>内容诊断</h3><p class="desc">AI 看完素材，告诉你哪里不行——而不是夸哪里好。</p></div>
-        <div class="block-example">开头 3 秒未点题，学员抓不住痛点；缺同城标签，流量难以本地化。</div>
-      </div>
-      <div class="block reveal">
-        <div class="block-num">02</div>
-        <div class="block-body"><h3>脚本改写</h3><p class="desc">把原话术重写成爆款结构，保留你的表达，重构节奏。</p></div>
-        <div class="block-example"><span class="tag">【痛点】</span>科二挂科 3 次？<span class="tag">【方法】</span>这个点位记住…<span class="tag">【钩子】</span>关注看下期。</div>
-      </div>
-      <div class="block reveal">
-        <div class="block-num">03</div>
-        <div class="block-body"><h3>标题包装</h3><p class="desc">标题、封面文案、标签一次配齐，为同城流量而设计。</p></div>
-        <div class="block-example">「深圳科二倒车入库，3 秒教会你」｜封面：点位示意｜#深圳驾校 #科二</div>
-      </div>
-      <div class="block reveal">
-        <div class="block-num">04</div>
-        <div class="block-body"><h3>转化话术</h3><p class="desc">评论区、私信、引导加微——把流量变成咨询。</p></div>
-        <div class="block-example">评论区置顶：深圳想学车的滴滴，科二科三一对一带练。</div>
-      </div>
-      <div class="block reveal">
-        <div class="block-num">05</div>
-        <div class="block-body"><h3>下期选题</h3><p class="desc">基于本条数据，告诉你下一条该拍什么。</p></div>
-        <div class="block-example">「科三路考常挂的 3 个细节」「深圳考场实地走线」</div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="steps">
-  <div class="wrap">
-    <div class="sec-head reveal">
-      <div class="sec-tag">流程</div>
-      <h2>三步开始。</h2>
-      <p>不需要学剪辑，不需要懂运营。上传，等待，发布。</p>
-    </div>
-    <div class="steps reveal">
-      <div class="step"><div class="sn">01</div><h4>上传素材</h4><p>视频片段或口播文字，原片不出本机。</p></div>
-      <div class="step"><div class="sn">02</div><h4>AI 生成方案</h4><p>五分钟，五块完整优化方案。</p></div>
-      <div class="step"><div class="sn">03</div><h4>照着改，照着发</h4><p>同城标签 + 转化话术，精准引流。</p></div>
-    </div>
-  </div>
-</section>
-
-<section id="compare">
-  <div class="wrap">
-    <div class="sec-head reveal">
-      <div class="sec-tag">对比</div>
-      <h2>改之前。改之后。</h2>
-      <p>同样的素材，不同的结果。</p>
-    </div>
-    <div class="compare reveal">
-      <div class="compare-col before">
-        <div class="clabel">改之前</div>
-        <ul><li>随手拍，流水账</li><li>没标题，没标签</li><li>评论区无人引导</li><li class="final">同城 0 获客</li></ul>
-      </div>
-      <div class="compare-col after">
-        <div class="clabel">改之后</div>
-        <ul><li>痛点开场，3 秒抓人</li><li>同城标签 + 封面文案</li><li>话术引导加微</li><li class="final">同城私信不断</li></ul>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="tool" id="tool">
-  <div class="wrap">
-    <div class="sec-head reveal">
-      <div class="sec-tag">工具</div>
+      <div class="sec-tag">优化工作台</div>
       <h2>生成你的方案。</h2>
       <p>选视频或贴文字，AI 帮你改。原片不出本机。</p>
     </div>
 
-    <div class="tool-tabs reveal" role="tablist">
-      <button class="tool-tab active" id="tab-optimize" data-tab="optimize" role="tab" aria-controls="panel-optimize" aria-selected="true">优化视频</button>
-      <button class="tool-tab" id="tab-topics" data-tab="topics" role="tab" aria-controls="panel-topics" aria-selected="false">选题灵感</button>
-    </div>
-
-    <div class="tool-panel" id="panel-optimize" role="tabpanel" aria-labelledby="tab-optimize">
+    <div class="tool-panel">
       <div id="dropzone" class="dropzone" tabindex="0">
         <input type="file" id="video-file" accept="video/*" hidden>
         <div id="dropzone-empty">
@@ -141,78 +24,21 @@
       <textarea id="input-text" class="input" placeholder="把视频内容粘贴到这里，二选一"></textarea>
       <div class="row">
         <div><label for="city">所在城市（可选，用于同城关键词）</label><input type="text" id="city" class="input" placeholder="如：长沙"></div>
-        <div><label for="platform">目标平台</label><select id="platform" class="input"><option value="douyin">抖音</option></select></div>
+        <div><label for="platform">目标平台</label><select id="platform" class="input"><option value="douyin">抖音（更多平台筹备中）</option></select></div>
       </div>
       <button class="btn btn-primary btn-block" id="gen-btn">生成方案</button>
       <div class="progress" id="progress" hidden>
         <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
         <div class="progress-text" id="progress-text">准备生成...</div>
       </div>
+      <p class="muted tool-hint">生成完成后会自动跳转到方案详情页，可收藏、可回看。</p>
       <div id="result"></div>
     </div>
-
-    <div class="tool-panel" id="panel-topics" role="tabpanel" aria-labelledby="tab-topics" hidden>
-      <div class="topics-sec">
-        <h3 class="topics-h">精选选题库</h3>
-        <p class="muted">这些选题当季好拍、学员爱搜，照着拍就能出内容。</p>
-        <div id="topic-list"></div>
-      </div>
-
-      <div class="topics-sec">
-        <h3 class="topics-h">AI 生成更多</h3>
-        <p class="muted">结合你的城市、季节和热点，生成一批当下该拍的选题。</p>
-        <div class="row">
-          <div>
-            <label for="topic-city">城市（可选）</label>
-            <input type="text" id="topic-city" class="input" placeholder="如：长沙">
-          </div>
-          <div>
-            <label for="topic-season">季节/节点</label>
-            <select id="topic-season" class="input">
-              <option value="">不指定</option>
-              <option value="暑期">暑期</option>
-              <option value="开学季">开学季</option>
-              <option value="寒假">寒假</option>
-              <option value="年后返工">年后返工</option>
-              <option value="年底冲量">年底冲量</option>
-            </select>
-          </div>
-        </div>
-        <label for="topic-hot">热点 / 想蹭的点（可选）</label>
-        <input type="text" id="topic-hot" class="input" placeholder="如：本地考场变更 / 电子考官 / 某条热门视频">
-        <button class="btn btn-primary btn-block" id="gen-topics-btn">生成更多选题</button>
-        <div class="progress" id="topics-progress" hidden>
-          <div class="progress-bar"><div class="progress-fill"></div></div>
-          <div class="progress-text" id="topics-progress-text">生成中...</div>
-        </div>
-        <div id="topics-result"></div>
-      </div>
-    </div>
-
-    <div class="history" id="history">
-      <div class="history-head"><span class="sec-tag">历史</span><h3>历史方案</h3></div>
-      <div id="history-list"></div>
-    </div>
   </div>
 </section>
 
-<section class="cta" id="cta">
-  <div class="wrap">
-    <h2>让 AI 帮你<br>写 <em class="em">第一条</em>。</h2>
-    <p>免费试用，三分钟看到第一份方案。</p>
-    <a class="btn btn-primary" href="#tool">开始使用</a>
-  </div>
-</section>
-
-<footer>
-  <div class="wrap foot-inner">
-    <span class="copy">© 2026 驾校内容优化工具 · 本地运行</span>
-    <div class="foot-links"><a href="#tool">开始使用</a></div>
-  </div>
-</footer>
-
-<div class="toast" id="toast" hidden></div>
-
-<script src="/static/js/app.js"></script>
-</body>
-</html>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/render.js"></script>
+<script src="/static/js/optimize.js"></script>
+{% endblock %}

@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}驾校内容优化工具 · 让每条视频都带来学员{% endblock %}
+{% block content %}
+
+<header class="hero">
+  <div class="wrap">
+    <div class="hero-grid">
+      <div class="hero-inner">
+        <div class="eyebrow">驾校内容，重新设计</div>
+        <h1>让每条视频，<br>都带来 <em class="em">学员</em>。</h1>
+        <p class="lede">上传教练的拍摄素材或口播文字，AI 五分钟生成一整套内容优化方案——从诊断到选题，照着改，照着发。</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="/optimize">立即体验</a>
+          <a class="btn btn-text" href="#sample">先看一条示例
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M6 13l6 6 6-6"/></svg>
+          </a>
+        </div>
+      </div>
+
+      <div class="sample-card reveal" id="sample">
+        <div class="sample-head">
+          <span class="sample-label">示例方案 · 科二倒车入库</span>
+          <span class="sample-badge">真实生成</span>
+        </div>
+        <div class="sample-row"><span class="sample-num">01</span><div><b>内容诊断</b><p>开头 3 秒未点题，学员抓不住痛点；缺同城标签，流量难以本地化。</p></div></div>
+        <div class="sample-row"><span class="sample-num">02</span><div><b>脚本改写</b><p>【痛点】科二挂科 3 次？【方法】这个点位记住…【钩子】关注看下期。</p></div></div>
+        <div class="sample-row"><span class="sample-num">03</span><div><b>标题包装</b><p>「深圳科二倒车入库，3 秒教会你」｜#深圳驾校 #科二</p></div></div>
+        <a class="btn btn-text btn-sm sample-more" href="/history">查看完整方案 →</a>
+      </div>
+    </div>
+
+    <div class="meta-strip">
+      <div class="meta-item"><div class="mv">5 块</div><div class="ml">完整优化方案</div></div>
+      <div class="meta-item"><div class="mv">3 分钟</div><div class="ml">快速出稿</div></div>
+      <div class="meta-item"><div class="mv">0 上传</div><div class="ml">原片不出本机</div></div>
+      <div class="meta-item"><div class="mv">同城</div><div class="ml">精准获客</div></div>
+    </div>
+  </div>
+</header>
+
+<section id="blocks">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="sec-tag">功能</div>
+      <h2>一套方案，五块拼图。</h2>
+      <p>不是一段文案，是一整套能照着做的优化方案。每一块都解决一个具体问题。</p>
+    </div>
+    <div class="blocks">
+      <div class="block reveal">
+        <div class="block-num">01</div>
+        <div class="block-body"><h3>内容诊断</h3><p class="desc">AI 看完素材，告诉你哪里不行——而不是夸哪里好。</p></div>
+        <div class="block-example">开头 3 秒未点题，学员抓不住痛点；缺同城标签，流量难以本地化。</div>
+      </div>
+      <div class="block reveal">
+        <div class="block-num">02</div>
+        <div class="block-body"><h3>脚本改写</h3><p class="desc">把原话术重写成爆款结构，保留你的表达，重构节奏。</p></div>
+        <div class="block-example"><span class="tag">【痛点】</span>科二挂科 3 次？<span class="tag">【方法】</span>这个点位记住…<span class="tag">【钩子】</span>关注看下期。</div>
+      </div>
+      <div class="block reveal">
+        <div class="block-num">03</div>
+        <div class="block-body"><h3>标题包装</h3><p class="desc">标题、封面文案、标签一次配齐，为同城流量而设计。</p></div>
+        <div class="block-example">「深圳科二倒车入库，3 秒教会你」｜封面：点位示意｜#深圳驾校 #科二</div>
+      </div>
+      <div class="block reveal">
+        <div class="block-num">04</div>
+        <div class="block-body"><h3>转化话术</h3><p class="desc">评论区、私信、引导加微——把流量变成咨询。</p></div>
+        <div class="block-example">评论区置顶：深圳想学车的滴滴，科二科三一对一带练。</div>
+      </div>
+      <div class="block reveal">
+        <div class="block-num">05</div>
+        <div class="block-body"><h3>下期选题</h3><p class="desc">基于本条数据，告诉你下一条该拍什么。</p></div>
+        <div class="block-example">「科三路考常挂的 3 个细节」「深圳考场实地走线」</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="compare">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="sec-tag">对比</div>
+      <h2>改之前。改之后。</h2>
+      <p>同样的素材，不同的结果。</p>
+    </div>
+    <div class="compare reveal">
+      <div class="compare-col before">
+        <div class="clabel">改之前</div>
+        <ul><li>随手拍，流水账</li><li>没标题，没标签</li><li>评论区无人引导</li><li class="final">同城 0 获客</li></ul>
+      </div>
+      <div class="compare-col after">
+        <div class="clabel">改之后</div>
+        <ul><li>痛点开场，3 秒抓人</li><li>同城标签 + 封面文案</li><li>话术引导加微</li><li class="final">同城私信不断</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="cta">
+  <div class="wrap">
+    <h2>让 AI 帮你<br>写 <em class="em">第一条</em>。</h2>
+    <p>免费试用，三分钟看到第一份方案。</p>
+    <a class="btn btn-primary" href="/optimize">开始使用</a>
+  </div>
+</section>
+
+{% endblock %}

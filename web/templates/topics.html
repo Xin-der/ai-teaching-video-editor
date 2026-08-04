@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}选题库 · 驾校内容优化工具{% endblock %}
+{% block content %}
+
+<section class="tool">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="sec-tag">选题库</div>
+      <h2>不知道拍什么？<br>从这里挑。</h2>
+      <p>当季好拍、学员爱搜的选题，照着拍就能出内容。</p>
+    </div>
+
+    <div class="tool-panel">
+      <div class="topics-sec">
+        <h3 class="topics-h">精选选题库</h3>
+        <p class="muted">这些选题当季好拍、学员爱搜，照着拍就能出内容。</p>
+        <div id="topic-list"></div>
+      </div>
+
+      <div class="topics-sec">
+        <h3 class="topics-h">AI 生成更多</h3>
+        <p class="muted">结合你的城市、季节和热点，生成一批当下该拍的选题。</p>
+        <div class="row">
+          <div>
+            <label for="topic-city">城市（可选）</label>
+            <input type="text" id="topic-city" class="input" placeholder="如：长沙">
+          </div>
+          <div>
+            <label for="topic-season">季节/节点</label>
+            <select id="topic-season" class="input">
+              <option value="">不指定</option>
+              <option value="暑期">暑期</option>
+              <option value="开学季">开学季</option>
+              <option value="寒假">寒假</option>
+              <option value="年后返工">年后返工</option>
+              <option value="年底冲量">年底冲量</option>
+            </select>
+          </div>
+        </div>
+        <label for="topic-hot">热点 / 想蹭的点（可选）</label>
+        <input type="text" id="topic-hot" class="input" placeholder="如：本地考场变更 / 电子考官 / 某条热门视频">
+        <button class="btn btn-primary btn-block" id="gen-topics-btn">生成更多选题</button>
+        <div class="progress" id="topics-progress" hidden>
+          <div class="progress-bar"><div class="progress-fill"></div></div>
+          <div class="progress-text" id="topics-progress-text">生成中...</div>
+        </div>
+        <div id="topics-result"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/topics.js"></script>
+{% endblock %}

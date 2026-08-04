@@ -43,6 +43,10 @@ assets/*.webp
 .idea/
 *.swp
 *.swo
+web/.workbuddy/
+
+# 本地参考页（不入库）
+example_html/
 
 # OS
 .DS_Store

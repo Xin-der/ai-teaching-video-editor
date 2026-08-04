@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}驾校内容优化工具{% endblock %}</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="logo" href="/"><span class="logo-dot"></span>驾校内容优化工具</a>
+    <div class="nav-links">
+      <a href="/optimize"{% if active == 'optimize' %} class="active"{% endif %}>优化</a>
+      <a href="/topics"{% if active == 'topics' %} class="active"{% endif %}>选题库</a>
+      <a href="/history"{% if active == 'history' %} class="active"{% endif %}>历史</a>
+    </div>
+    <a class="nav-cta" href="/optimize">开始使用</a>
+  </div>
+</nav>
+
+{% block content %}{% endblock %}
+
+<footer>
+  <div class="wrap foot-inner">
+    <span class="copy">© 2026 驾校内容优化工具 · 本地运行</span>
+    <div class="foot-links"><a href="/optimize">开始使用</a></div>
+  </div>
+</footer>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="/static/js/common.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

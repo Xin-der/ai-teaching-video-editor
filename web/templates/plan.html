@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}方案详情 · 驾校内容优化工具{% endblock %}
+{% block content %}
+
+<section class="tool">
+  <div class="wrap">
+    <div class="plan-header">
+      <div class="sec-tag">方案详情</div>
+      <h2 class="plan-title" id="plan-title">优化方案</h2>
+      <p class="muted" id="plan-meta"></p>
+      <div class="plan-actions">
+        <button class="btn btn-primary btn-sm" id="copy-all-btn">复制全部</button>
+        {% if plan.markdown_path %}
+        <a class="btn btn-outline btn-sm" href="/output/optimize/plan_{{ plan.id }}.md" download>下载 Markdown</a>
+        {% endif %}
+        <a class="btn btn-text btn-sm" href="/optimize">再生成一条 →</a>
+      </div>
+    </div>
+
+    <div class="plan-layout">
+      <nav class="plan-toc" id="plan-toc" aria-label="方案目录"></nav>
+      <div class="plan-blocks" id="plan-blocks"></div>
+    </div>
+  </div>
+</section>
+
+<script>
+  window.PLAN = {{ plan | tojson }};
+</script>
+
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/render.js"></script>
+<script src="/static/js/plan.js"></script>
+{% endblock %}

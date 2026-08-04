@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}历史方案 · 驾校内容优化工具{% endblock %}
+{% block content %}
+
+<section class="tool">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="sec-tag">历史</div>
+      <h2>历史方案。</h2>
+      <p>你生成过的每一份方案都在这里，随时回看。</p>
+    </div>
+
+    <div class="tool-panel">
+      <div id="history-list"></div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/history.js"></script>
+{% endblock %}
