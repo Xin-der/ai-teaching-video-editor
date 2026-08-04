@@ -136,6 +136,18 @@ select.input{cursor:pointer}
 .field .k{flex-shrink:0;color:var(--ink-3);min-width:56px;font-size:13px;padding-top:2px}
 .copy-row{margin-top:14px;text-align:right}
 
+/* ===== 帧点评 ===== */
+.frame-card{border-top:1px solid var(--line);padding:20px 0;margin-top:20px}
+.frame-card:first-child{border-top:none;padding-top:0;margin-top:0}
+.frame-meta{font-size:12px;color:var(--accent);font-weight:500;letter-spacing:0.04em;margin-bottom:10px;font-variant-numeric:tabular-nums}
+.frame-img{position:relative;display:inline-block;max-width:100%}
+.frame-img img{display:block;max-width:100%;border:1px solid var(--line);border-radius:4px}
+.frame-boxes{position:absolute;inset:0}
+.frame-box{position:absolute;border:2px solid var(--accent);background:rgba(255,153,51,0.12);pointer-events:none;display:block}
+.frame-problem{font-size:14px;margin-top:8px;line-height:1.55}
+.frame-problem .tag{color:var(--accent);font-weight:500}
+.frame-problem .muted{margin-left:2px}
+
 /* ===== 历史 ===== */
 .history{margin-top:72px;border-top:1px solid var(--line);padding-top:40px}
 .history-head{margin-bottom:24px}

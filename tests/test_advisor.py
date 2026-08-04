@@ -229,7 +229,7 @@ def test_build_plan_insufficient_transcript_clear_error():
 
     # 视频转录过短（打桩 _analyze_video，避免真实 ASR）
     with mock.patch.object(ContentAdvisor, "_analyze_video",
-                           return_value=("系。", {})):
+                           return_value=("系。", {}, [])):
         with tempfile.TemporaryDirectory() as tmp:
             v = os.path.join(tmp, "x.mp4")
             open(v, "w").close()
@@ -250,6 +250,132 @@ def test_plan_prompt_supports_generic_content():
     assert "实际内容" in prompt, "prompt 应强调基于实际内容"
     for key in ("diagnosis", "script_rewrite", "packaging", "conversion", "next_topics"):
         assert key in prompt, f"prompt 缺少 {key}"
+    return True
+
+
+def test_frame_diagnose_selects_top_and_sanitizes():
+    """帧诊断：按最严重问题取 top 帧；越界坐标丢弃；severity 收敛 0-1"""
+    from unittest import mock
+    import engine.frame_diagnose as fd
+
+    problems_a = [{"category": "lighting", "label": "逆光", "box": [0.1, 0.1, 0.5, 0.5],
+                   "severity": 0.3, "advice": "补光"}]
+    problems_b = [{"category": "blur", "label": "模糊", "box": [0.0, 0.0, 1.5, 0.5],
+                   "severity": 0.9, "advice": "防抖"}]
+    problems_c = [{"category": "other", "label": "无框", "severity": 0.2}]
+    specs = [
+        {"path": "a.jpg", "time": 5},
+        {"path": "b.jpg", "time": 30},
+        {"path": "c.jpg", "time": 60},
+    ]
+    with mock.patch.object(fd, "_resize_and_read_b64", return_value="QUJD"), \
+         mock.patch.object(fd, "_call_diagnose", side_effect=[problems_a, problems_b, problems_c]), \
+         mock.patch.object(fd, "DASHSCOPE_API_KEY", "test"), \
+         mock.patch("engine.frame_diagnose.os.path.exists", return_value=True):
+        result = fd.diagnose_frames(specs, work_dir="work")
+
+    frames = result.get("frames", [])
+    assert frames, "应有诊断结果"
+    assert frames[0]["time"] == 30, "最严重(0.9)帧应排第一"
+    assert len(frames) <= 3, "最多取 3 帧"
+    b = next(f for f in frames if f["time"] == 30)
+    assert b["problems"][0]["box"] is None, "越界坐标应被丢弃"
+    # 直接测 _sanitize_problems：越界 severity 收敛、越界 box 丢弃
+    cleaned = fd._sanitize_problems([{"severity": 1.7, "box": [0, 0, 2, 2]}])
+    assert cleaned[0]["severity"] == 1.0, "severity 应收敛到 1.0"
+    assert cleaned[0]["box"] is None, "越界 box 应被丢弃"
+    return True
+
+
+def test_frame_diagnose_graceful_degrade():
+    """帧诊断失败 / 无 key / 无帧 → 返回空 dict，不抛异常"""
+    from unittest import mock
+    import engine.frame_diagnose as fd
+
+    # 无 API key → 空
+    with mock.patch.object(fd, "DASHSCOPE_API_KEY", ""):
+        assert fd.diagnose_frames([{"path": "a.jpg", "time": 1}]) == {}
+    # 空帧列表 → 空
+    with mock.patch.object(fd, "DASHSCOPE_API_KEY", "test"):
+        assert fd.diagnose_frames([]) == {}
+    # VLM 全部失败 → 空
+    with mock.patch.object(fd, "_resize_and_read_b64", return_value="QUJD"), \
+         mock.patch.object(fd, "_call_diagnose", return_value=[]), \
+         mock.patch.object(fd, "DASHSCOPE_API_KEY", "test"), \
+         mock.patch("engine.frame_diagnose.os.path.exists", return_value=True):
+        assert fd.diagnose_frames([{"path": "a.jpg", "time": 1}]) == {}
+    return True
+
+
+def test_build_plan_attaches_frames():
+    """视频方案应携带帧点评 frames 字段"""
+    import os
+    import tempfile
+    from unittest import mock
+    from engine.advisor import ContentAdvisor
+
+    fake_plan = {
+        "diagnosis": {"summary": "诊断", "issues": [], "strengths": []},
+        "script_rewrite": {"hook": "", "body": "", "proof": "", "cta": ""},
+        "packaging": {"title": "", "cover_text": "", "description": ""},
+        "conversion": {"pinned_comment": "", "profile_bio": "", "dm_opening": ""},
+        "next_topics": [],
+    }
+    fake_frames = [{"index": 0, "time": 5, "image_b64": "x",
+                    "problems": [{"category": "lighting", "label": "逆光", "box": None,
+                                  "severity": 0.8, "advice": "补光"}]}]
+    with tempfile.TemporaryDirectory() as tmp:
+        v = os.path.join(tmp, "v.mp4"); open(v, "w").close()
+        advisor = ContentAdvisor(work_dir="work")
+        with mock.patch.object(ContentAdvisor, "_analyze_video",
+                               return_value=("这是一段足够长的教学视频内容", {"topics": []}, fake_frames)), \
+             mock.patch("engine.analyzer.ContentAnalyzer") as M:
+            inst = M.return_value
+            inst.generate_optimization_plan.return_value = fake_plan
+            result = advisor.build_plan(video_path=v)
+    assert result.get("frames") == fake_frames, "方案应携带帧点评"
+    return True
+
+
+def test_write_plan_markdown_frame_text_only():
+    """markdown 含帧点评文字，但不内嵌 base64 图片"""
+    import tempfile
+    from engine.advisor import write_plan_markdown
+
+    plan = {
+        "diagnosis": {"summary": "s", "issues": [], "strengths": []},
+        "script_rewrite": {"hook": "", "body": "", "proof": "", "cta": ""},
+        "packaging": {"title": "", "cover_text": "", "description": ""},
+        "conversion": {"pinned_comment": "", "profile_bio": "", "dm_opening": ""},
+        "next_topics": [],
+        "frames": [{"index": 0, "time": 75,
+                    "image_b64": "QmFzZTY0SU1BR0U=",  # "Base64IMAGE"
+                    "problems": [{"category": "lighting", "label": "逆光",
+                                  "severity": 0.8, "advice": "补光", "box": [0, 0, 0.5, 0.5]}]}],
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        out = write_plan_markdown(plan, f"{tmp}/plan.md")
+        content = open(out, "r", encoding="utf-8").read()
+    assert "⑥ 帧点评" in content, "markdown 应含帧点评标题"
+    assert "逆光" in content, "markdown 应含问题文字"
+    assert "01:15" in content, "markdown 应含帧时间（75s → 01:15）"
+    assert "QmFzZTY0SU1BR0U=" not in content, "markdown 不应内嵌 base64 图片"
+    return True
+
+
+def test_detect_scenes_fallback_synthesize():
+    """无场景切换视频：合成等分伪场景，保证关键帧/帧点评可用"""
+    from engine.pipeline import Pipeline
+    p = object.__new__(Pipeline)  # 绕过 __init__（不要求真实视频）
+    p.video_duration = 90
+    scenes = p._synthesize_scenes()
+    assert len(scenes) == 4, "90s 视频应合成 4 段"
+    assert scenes[0]["start"] == 0.0
+    assert scenes[-1]["end"] == 90.0
+    assert all(0 <= s["start"] < s["end"] <= 90 for s in scenes)
+    # 短视频至少 1 段
+    p.video_duration = 9
+    assert len(p._synthesize_scenes()) == 1
     return True
 
 

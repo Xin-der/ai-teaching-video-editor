@@ -78,13 +78,15 @@ function pollStatus() {
 
 function renderPlan(plan) {
   const box = document.getElementById('result');
-  box.innerHTML = [
+  const cards = [
     planCard(0, plan.diagnosis, false),
     planCard(1, plan.script_rewrite, false),
     planCard(2, plan.packaging, false),
     planCard(3, plan.conversion, false),
     planCard(4, plan.next_topics, true),
-  ].join('');
+  ];
+  const frameCard = (plan.frames && plan.frames.length) ? frameDiagnoseCard(plan.frames) : '';
+  box.innerHTML = cards.join('') + frameCard;
   box.scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -111,6 +113,60 @@ function renderTopics(list) {
   return list.map(t =>
     `<p class="field"><span class="k">选题</span><span class="v">${esc(t.title || '')} — ${esc(t.why || '')}</span></p>`
   ).join('');
+}
+
+/* ===== 帧点评 ===== */
+function frameDiagnoseCard(frames) {
+  return `<div class="block frame-block">
+    <div class="block-num">06</div>
+    <div class="block-body">
+      <h3>帧点评</h3>
+      <p class="muted">AI 挑出最有问题的帧，橙色框是问题区域。</p>
+      ${frames.map(renderFrame).join('')}
+    </div>
+    <div class="copy-row"><button class="btn btn-text btn-sm" onclick="copyFrameText()">复制诊断 →</button></div>
+  </div>`;
+}
+
+function renderFrame(f) {
+  const time = (f.time != null) ? fmtTime(f.time) : `帧 ${(f.index || 0) + 1}`;
+  const probs = (f.problems || []).map(p =>
+    `<p class="frame-problem"><span class="tag">${esc(p.label)}</span>` +
+    (p.advice ? ` <span class="muted">——${esc(p.advice)}</span>` : '') +
+    (p.severity != null ? ` <span class="muted">严重度 ${(p.severity).toFixed(2)}</span>` : '') +
+    `</p>`
+  ).join('') || '<p class="muted">（无明显问题）</p>';
+
+  const img = f.image_b64
+    ? `<div class="frame-img">
+        <img src="data:image/jpeg;base64,${f.image_b64}" alt="诊断帧 ${time}">
+        <div class="frame-boxes">${(f.problems || []).filter(p => p.box).map(p => {
+          const b = p.box;
+          return `<i class="frame-box" style="left:${b[0] * 100}%;top:${b[1] * 100}%;width:${(b[2] - b[0]) * 100}%;height:${(b[3] - b[1]) * 100}%" title="${esc(p.label)}"></i>`;
+        }).join('')}</div>
+      </div>`
+    : '<p class="muted">（无画面）</p>';
+
+  return `<div class="frame-card"><div class="frame-meta">${time}</div>${img}${probs}</div>`;
+}
+
+function copyFrameText() {
+  const frames = (currentPlan && currentPlan.frames) || [];
+  if (!frames.length) { toast('没有可复制的帧诊断', true); return; }
+  const lines = frames.map((f, i) => {
+    const time = (f.time != null) ? fmtTime(f.time) : `帧 ${i + 1}`;
+    const probs = (f.problems || []).map(p =>
+      `${p.label || ''}${p.severity != null ? `（${p.severity.toFixed(2)}）` : ''}${p.advice ? `——${p.advice}` : ''}`
+    ).join('；');
+    return `${time}：${probs || '无明显问题'}`;
+  });
+  copyText(lines.join('\n')).then(ok => toast(ok ? '已复制 ✅' : '复制失败', !ok));
+}
+
+function fmtTime(s) {
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
 function copyBlock(idx) {
@@ -194,7 +250,10 @@ function loadHistory() {
 
 function saveHistory(plan) {
   const list = loadHistory();
-  list.unshift({ ts: Date.now(), plan });
+  // 历史只存文字诊断，不存 base64 图片，避免撑爆 localStorage
+  const slim = JSON.parse(JSON.stringify(plan));
+  if (slim.frames) slim.frames.forEach(f => delete f.image_b64);
+  list.unshift({ ts: Date.now(), plan: slim });
   if (list.length > HISTORY_MAX) list.length = HISTORY_MAX;
   localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
   renderHistory();

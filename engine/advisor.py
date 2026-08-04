@@ -10,6 +10,7 @@
 
 import json
 import os
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -56,6 +57,22 @@ def write_plan_markdown(plan: dict, out_path: str) -> str:
     for t in plan.get("next_topics", []):
         lines.append(f"- **{t.get('title', '')}** — {t.get('why', '')}")
 
+    # ⑥ 帧点评（仅文字诊断，不内嵌 base64 图片，避免文件过大）
+    frames = plan.get("frames") or []
+    if frames:
+        lines += ["", "## ⑥ 帧点评（文字诊断）"]
+        for i, f in enumerate(frames, 1):
+            prob_text = "；".join(
+                f"{p.get('label', '')}（严重度 {p.get('severity', 0):.2f}）"
+                f"{('——' + p.get('advice', '')) if p.get('advice') else ''}"
+                for p in f.get("problems", [])
+            )
+            time_text = f.get("time")
+            label = (f"第 {int(time_text // 60):02d}:{int(time_text % 60):02d} 帧"
+                     if isinstance(time_text, (int, float))
+                     else f"帧 {f.get('index', i) + 1}")
+            lines.append(f"- **{label}**：{prob_text or '（无明显问题）'}")
+
     text = "\n".join(lines)
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
@@ -75,13 +92,14 @@ class ContentAdvisor:
         """主入口。video_path 和 text 至少提供一个，text 优先。"""
         transcript = ""
         vlm_summary = {}
+        frames = []
 
         if text and text.strip():
             transcript = text.strip()
         elif video_path:
             if not os.path.exists(video_path):
                 return {"error": f"视频文件不存在: {video_path}"}
-            transcript, vlm_summary = self._analyze_video(video_path)
+            transcript, vlm_summary, frames = self._analyze_video(video_path)
         else:
             return {"error": "请上传视频或粘贴文字"}
 
@@ -107,10 +125,16 @@ class ContentAdvisor:
             return {"error": f"方案生成失败: {plan.get('_error')}"}
         if plan.get("_parse_error"):
             return {"error": "方案解析失败，请重试"}
+        if frames:
+            plan["frames"] = frames
         return plan
 
     def _analyze_video(self, video_path: str) -> tuple:
-        """复用 Pipeline 的 ASR + VLM。返回 (transcript_str, vlm_summary_dict)。"""
+        """复用 Pipeline 的 ASR + VLM + 帧点评。
+
+        返回 (transcript_str, vlm_summary_dict, frames_list)。
+        帧点评失败不阻塞：frames 为空时主流程照常出 5 块方案。
+        """
         from engine.pipeline import Pipeline
 
         # 每次分析用独立工作目录。Pipeline 的中间产物（audio.wav /
@@ -127,13 +151,36 @@ class ContentAdvisor:
         transcript = " ".join(s.get("text", "") for s in segs)
 
         vlm_summary = {"topics": [], "visuals": []}
+        frames = []
         try:
-            frames = p.extract_visuals()
+            descs = p.extract_visuals()
             topics = list(dict.fromkeys(
-                fd.get("topic", "") for fd in frames if fd.get("topic")
+                fd.get("topic", "") for fd in descs if fd.get("topic")
             ))
-            visuals = [fd.get("detail", "") for fd in frames if fd.get("detail")]
-            vlm_summary = {"topics": topics, "visuals": visuals, "frame_count": len(frames)}
+            visuals = [fd.get("detail", "") for fd in descs if fd.get("detail")]
+            vlm_summary = {"topics": topics, "visuals": visuals, "frame_count": len(descs)}
+
+            # 帧点评：复用已采样关键帧，不新增采样成本；失败/无结果 → 空，不阻塞
+            frame_specs = []
+            for fd in descs:
+                frame_file = fd.get("frame_file")
+                if not frame_file:
+                    continue
+                fp = p.frames_dir / frame_file
+                time_s = None
+                m = re.search(r'seg(\d+)', frame_file)
+                if m:
+                    sid = int(m.group(1))
+                    scene = next((s for s in p.scenes if s.get("id") == sid), None)
+                    if scene:
+                        time_s = scene.get("start")
+                frame_specs.append({"path": str(fp), "time": time_s})
+
+            from engine.frame_diagnose import diagnose_frames
+            diag = diagnose_frames(frame_specs, work_dir=str(run_dir))
+            frames = diag.get("frames", [])
+            if frames:
+                print(f"  ✅ 帧点评: {len(frames)} 帧")
         except Exception as e:
-            print(f"  ⚠ VLM 描述失败（非阻塞，跳过）: {e}")
-        return transcript, vlm_summary
+            print(f"  ⚠ VLM/帧点评失败（非阻塞，跳过）: {e}")
+        return transcript, vlm_summary, frames

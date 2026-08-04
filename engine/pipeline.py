@@ -350,6 +350,12 @@ class Pipeline:
                     "duration": round(e - s, 2),
                 })
 
+            if not self.scenes and self.video_duration > 0:
+                # 单镜头/无场景切换视频（如教练手机随手拍）：按时长等分合成伪场景，
+                # 保证 VLM 描述与帧点评都有关键帧可分析
+                self.scenes = self._synthesize_scenes()
+                print(f"  ⚠ 未检测到场景切换，合成 {len(self.scenes)} 段伪场景保底关键帧")
+
             with open(self.scenes_path, "w", encoding="utf-8") as f:
                 json.dump({"scenes": self.scenes, "total": len(self.scenes)},
                           f, ensure_ascii=False, indent=2)
@@ -376,6 +382,20 @@ class Pipeline:
 
         frame_count = len(list(self.frames_dir.glob("*.jpg")))
         print(f"  关键帧: {frame_count} 张")
+
+    def _synthesize_scenes(self) -> list:
+        """单镜头/无场景切换视频保底：按时长等分合成伪场景，保证有关键帧可分析
+
+        最多 4 段；时长不足 20s 也至少 1 段。
+        """
+        n = min(4, max(1, int(self.video_duration // 20) or 1))
+        step = self.video_duration / n
+        scenes = []
+        for i in range(n):
+            s = round(i * step, 2)
+            e = round((i + 1) * step, 2)
+            scenes.append({"id": i, "start": s, "end": e, "duration": round(e - s, 2)})
+        return scenes
 
     def _load_scenes(self):
         """加载缓存的场景数据"""
