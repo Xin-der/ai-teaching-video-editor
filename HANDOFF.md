@@ -14,7 +14,39 @@
 
 ---
 
-## 二、v3 新增（内容优化工具）
+## 二、v4（内容教练工作台方向）
+
+**方向（2026-08-03 与用户确认）**: 从"单次优化工具"演进为**模块化功能 + 统一"AI 内容教练"叙事**。品牌叙事：*选题 → 拍摄 → 优化 → 发布，把你的视频变成学员*。按用户此刻意图组织入口（优化视频 / 选题灵感），解决"功能关联性不强"的观感——靠叙事与信息架构，不靠强制工作流。
+
+**关键决策**:
+- **行业可配置，驾考先行**: 架构参数化知识库/热词/prompt（`engine/industry_config.py` 待建），驾考仍是最先落地行业，保留护城河；不现在就泛化
+- **P2 帧点评**: 自动挑 2-3 个"最有问题"帧 → VLM 诊断（画质 + 内容表达）→ 图上标注框 + 文字建议
+- **P3 选题灵感**: 精选选题库（静态）+ AI 生成更多（结合行业知识库 + 城市 + 季节 + 热点半自动）
+- **P4 部署**: 试用阶段 CF Tunnel 免费方案（本机跑 + 公网隧道），价值验证后云服务器（阿里/腾讯轻量）+ Caddy；两套运维手册
+
+**设计文档**: `docs/superpowers/specs/2026-08-02-v4-content-coach-design.md`（完整含 P1-P4 设计）
+
+### v4 P1 完成（2026-08-04）: 前端编辑风重设计
+
+把 v3.1 浅蓝卡片风前端整体切换为**极简编辑风**（墨黑 `--ink` + 暖橙 `--accent` + 发丝边框 + 超大排版 + 胶囊按钮 + 滚动渐显），设计语言来自用户参考页 `example_html/index-min.html`（**本地参考，不入库**）。
+
+- **页面结构（营销前置）**: Nav → 整屏 Hero（meta条：5块/3分钟/0上传/同城）→ 五块拼图 → 三步 → 对比（改之前/改之后）→ ★核心工具区（Tab1 优化视频 / Tab2 选题灵感占位 + 历史方案）→ CTA → Footer
+- **工具直达**: 导航"开始使用"/Hero"立即体验"一键滚动到工具区，双 Tab 直接可用
+- **文件**: `web/templates/optimize.html` 重写；`web/static/css/style.css` 重写 token+组件；`web/static/js/app.js` 保留核心逻辑 + `switchTab`（双 Tab）+ 编辑编号行结果渲染 + IntersectionObserver 滚动渐显
+- **测试**: `tests/test_frontend.py` 升级 11 项（新 token + 营销前置结构 + 双 Tab 断言）；前端 11/11 + 顾问 10/10 + ASR 10/10；后端 `web/app.py` 零改动
+- **实施计划**: `docs/superpowers/plans/2026-08-04-p1-frontend-editorial-redesign.md`
+- **过程**: 子代理驱动 5 任务 + 每任务审查 + 最终整分支审查（opus）通过；修复波次（文档一致性 + switchTab 防御 + 触控目标）
+- **Deferred**: Tab 键盘方向键导航（增强，后续可做）；`em.em` 类名（参考页同款）；`--ink-3` 对比度按用户裁定保持参考页原值
+
+### v4 后续（P2 → P3 → P4）
+
+- [ ] **P2 帧点评**（后端独立，最先做）：`engine/frame_diagnose.py` + `/api/optimize` 响应加 `frames` 字段 + 前端标注框渲染
+- [ ] **P3 选题灵感**：`engine/industry_config.py`（轻量行业配置）+ `knowledge/driving_exam_topics.json` + `/api/topics/generate` + 前端 Tab2 填充
+- [ ] **P4 部署 + 运维手册**：跨平台改造（ffmpeg 路径/pathlib/启动脚本）+ waitress + CF Tunnel / 云服务器 + 运维手册（P1-P3 完成后做）
+
+---
+
+## 三、v3 新增（内容优化工具）
 
 **v3.1 前端重构（2026-08-02）**: 前端从暗色单页工具重构为**浅色商务风单页 MVP 产品站**（Hero 价值主张 → 三步怎么用 → 核心工具 → 历史方案 → 五块说明 → Footer），面向驾校老板/运营（非技术人群），简约大气、讲究留白。样式拆至 `web/static/css/style.css`（设计 token + 组件 + 响应式 + 无障碍），逻辑拆至 `web/static/js/app.js`（真实调 `/api/optimize` + `/api/optimize/status`）；新增本地历史方案（localStorage 上限 20，可回看/复制/删除）。`web/app.py` 零改动。设计文档/实施计划见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`。框架决策：暂不上 SPA（单页纯静态足够；产品放大/多用户时再上 Vue/React）。
 
@@ -35,7 +67,7 @@
 
 ---
 
-## 三、用户需求（原始 + 演进）
+## 四、用户需求（原始 + 演进）
 
 ### 原始需求
 1. 驾考教练拍摄的教学长视频（5-15分钟）
@@ -52,7 +84,7 @@
 
 ---
 
-## 四、当前代码状态
+## 五、当前代码状态
 
 ### 项目结构
 ```
@@ -75,10 +107,10 @@ ai-teaching-video-editor/
 │   └── bgm/default_bgm.m4a        ← 默认BGM（C大调和弦进行，16s循环）
 ├── web/                           ← Web 产品站（Flask）
 │   ├── app.py                     ← API服务（optimize/status/静态托管/旧导出接口）
-│   ├── templates/optimize.html    ← 页面骨架（Hero/三步/工具/历史/五块说明/Footer）
+│   ├── templates/optimize.html    ← 编辑风营销前置骨架（Nav/Hero/五块/三步/对比/双Tab工具区/CTA/Footer）
 │   └── static/
-│       ├── css/style.css          ← 设计系统（浅色商务风 token + 组件 + 响应式）
-│       └── js/app.js              ← 交互逻辑（生成/轮询/渲染/复制/历史）
+│       ├── css/style.css          ← 设计系统（编辑风：墨黑+暖橙 token + 发丝边框 + 组件 + 响应式）
+│       └── js/app.js              ← 交互逻辑（生成/轮询/渲染/复制/历史/双Tab切换）
 ├── run.py                         ← CLI 入口
 ├── RUN.bat / RUN_WEB.bat          ← Windows 一键启动
 ├── tests/test_export.py           ← 导出测试
@@ -111,7 +143,7 @@ ai-teaching-video-editor/
 
 ---
 
-## 五、已完成的重大修复（2026-07-29 ~ 08-01）
+## 六、已完成的重大修复（2026-07-29 ~ 08-01）
 
 ### Bug修复
 1. **ASS字幕三平台混淆** — `subtitles.ass` 改为 `subtitles_{platform}.ass`，每平台独立PlayRes
@@ -140,7 +172,7 @@ ai-teaching-video-editor/
 
 ---
 
-## 六、产品方向（已定：内容优化工具）
+## 七、产品方向（已定：内容优化工具）
 
 **方向已定（2026-08-01）**: 放弃"切片/导出工具"，转向"内容优化工具"。
 
@@ -178,7 +210,13 @@ ai-teaching-video-editor/
 
 ---
 
-## 七、遗留问题和待办
+## 八、遗留问题和待办
+
+### v4（内容教练工作台，当前方向）
+- [x] P1 前端编辑风重设计 → 完成（2026-08-04，营销前置 + 双 Tab 工具区）
+- [ ] P2 帧点评（自动挑问题帧 + VLM 诊断 + 标注框）→ 下一步
+- [ ] P3 选题灵感（精选库 + AI 生成更多 + 轻量行业配置）
+- [ ] P4 部署 + 运维手册（CF Tunnel 试用 / 云服务器正式，跨平台改造 + waitress）
 
 ### 立即
 - [x] **决定产品方向**（A/B/C 三选一）→ 已定：内容优化工具（A 的内容诊断 + 获客转化，经真实用户验证）
@@ -207,7 +245,7 @@ ai-teaching-video-editor/
 
 ---
 
-## 八、环境信息
+## 九、环境信息
 
 | 项目 | 详情 |
 |------|------|
@@ -233,16 +271,16 @@ py -3.12 run.py input/PNIK4383.MOV --export
 # 单元测试
 py -3.12 tests/test_asr.py       # 10/10（SenseVoice 模块，mock 不下载模型）
 py -3.12 tests/test_advisor.py   # 10/10
-py -3.12 tests/test_frontend.py  # 8/8
+py -3.12 tests/test_frontend.py  # 11/11
 ```
 
 ---
 
-## 九、给新会话的启动语
+## 十、给新会话的启动语
 
 ```
 请先阅读 HANDOFF.md 和 PROGRESS.md 了解项目状态。
-方向已定：驾校内容优化工具（v3 内容优化 + v3.1 前端浅色商务风 + v3.2 ASR 抗噪已完成，详见第二/四章）。
-下一步：按 `docs/trial/2026-08-02-教练试用方案.md` 接 1-2 家真实教练试用，验证"视频→方案→发布→留资"闭环；落地反馈循环（记录每条视频的诊断→建议→实际播放/留资数据）。
-协作注意：尽量轻量直接，别套重流程；拿不准的开头一次性确认。
+方向已定：驾校内容优化工具 → 内容教练工作台（v4，行业可配置·驾考先行；模块化 + 内容教练叙事）。已完成：v3 内容优化 + v3.1 前端 + v3.2 ASR 抗噪 + v4 P1 前端编辑风重设计（详见第二/三/五章）。
+下一步：P2 帧点评（自动挑问题帧 + VLM 诊断 + 标注框，详见 v4 spec 第四章）→ P3 选题灵感 → P4 部署 + 运维手册。真实教练试用（docs/trial/）与反馈循环可并行推进。
+协作注意：尽量轻量直接，别套重流程；superpowers 技能默认不用、用户明确要求才用；拿不准的开头一次性确认。
 ```

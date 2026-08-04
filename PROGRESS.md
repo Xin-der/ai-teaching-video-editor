@@ -14,9 +14,12 @@
 - `web/templates/optimize.html` 重写为营销前置骨架；`web/static/css/style.css` 重写 token 与组件；`web/static/js/app.js` 保留核心逻辑 + 新增 `switchTab`（双 Tab）+ 编辑编号行结果渲染 + IntersectionObserver 滚动渐显
 - `tests/test_frontend.py` 升级为 11 项（新 token + 营销前置结构 + 双 Tab 断言）；后端 `web/app.py` 零改动
 - 设计文档 `docs/superpowers/specs/2026-08-02-v4-content-coach-design.md`、实施计划 `docs/superpowers/plans/2026-08-04-p1-frontend-editorial-redesign.md`
-- 过程：子代理驱动 5 任务 + 每任务审查通过（SDD）
+- 过程：子代理驱动 5 任务 + 每任务审查 + 最终整分支审查（opus）通过；修复波次（文档一致性 + switchTab 防御 + 触控目标）
+- Deferred：Tab 键盘方向键导航（增强）；`em.em` 类名（参考页同款）；`--ink-3` 对比度按用户裁定保持参考页原值
 
-### v3（当前）: 驾校内容优化工具
+**下一步**: P2 帧点评（自动挑问题帧 + VLM 诊断 + 标注框）→ P3 选题灵感 → P4 部署 + 运维手册。详见 HANDOFF.md 第二章。
+
+### v3: 驾校内容优化工具
 目标：教练的素材视频/文字 → AI 生成 5 块《内容优化方案》（诊断/脚本改写/包装/转化话术/下期选题）→ 帮已有内容获客转化（同城）。
 **当前状态**: 开发完成，单元测试 10/10，真实 API（文字+视频）验证通过。
 
@@ -30,7 +33,7 @@
 - `tests/test_advisor.py`：10 个单元测试（TDD）
 - 集成验收：CLI 文字/视频模式 + Web 全流程真实调用均通过
 
-### v3.2（当前）: ASR 抗噪升级（SenseVoice）
+### v3.2: ASR 抗噪升级（SenseVoice）
 目标：把 ASR 从 paraformer（seaco 增强版）换成 SenseVoice-Small + fsmn-vad + 驾考热词，解决车内噪音+考试播报导致的碎片化转录。
 **当前状态**: 完成（2026-08-02），单测 ASR 10/10 + 顾问 10/10 + 前端 8/8，真实转录 + 完整 optimize 流程端到端验证通过。
 - 新增 `engine/asr.py`：`load_hotwords()`（从知识库生成驾考热词表）+ `SenseVoiceASR`（进程级模型单例，`transcribe()` 返回秒级 `[{start,end,text}]`）
